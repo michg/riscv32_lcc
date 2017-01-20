@@ -22,8 +22,8 @@ First build the simulation:
 Then either run a single test:      
 > ./runtest.sh sort  
 
-The result will ./sort/result/sort.log.  
-The simulation output will be ./sort/result/result.log
+The result will be in ./sort/result/sort.log.  
+The simulation output will be in ./sort/result/result.log
 Or run all tests:    
 > ./runalltest.sh  
 
