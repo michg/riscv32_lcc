@@ -286,7 +286,10 @@ reg:	CVUU4(INDIRU2(saddr))	"\tlhu x%c,%0\n"	1
 reg:	CVUI4(INDIRU1(saddr))	"\tlbu x%c,%0\n"	1
 reg:	CVUI4(INDIRU2(saddr))	"\tlhu x%c,%0\n"	1
 
-addr:	con			"%0"
+acon12: CNSTP4 "%a" range(a,0,4095)
+acon12: CNSTP4 "\tauipc x%c,(%a>>12) "   1
+
+addr:	acon12			"%0(x0)"
 addr:	reg			"0(x%0)"
 addr:	ADDRFP4			"%a+%F(x2)"
 addr:	ADDRLP4			"%a+%F(x2)"
@@ -336,7 +339,7 @@ reg: MULI4(reg,reg)  "\tmul x%c,x%0,x%1\n"   1
 reg: MULU4(reg,reg)  "\tmul x%c,x%0,x%1\n"   1
 
 con12: CNSTI4 "%a" range(a,-2048,2047)
-con12: CNSTU4 "%a" range(a,0,2047)
+con12: CNSTU4 "%a" range(a,0,4095)
 
 reg: ADDI4(reg,reg)   "\tadd x%c,x%0,x%1\n"  1
 reg: ADDI4(reg,con12) "\taddi x%c,x%0,%1\n"  1
