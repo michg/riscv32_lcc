@@ -1280,7 +1280,8 @@ void formatSB(unsigned int code) {
   getToken();
   v = parseExpression();
   if (v.sym == NULL) {
-    immed = (v.con - ((signed) segPtr[currSeg] )) / 2;
+    //immed = (v.con - ((signed) segPtr[currSeg] )) / 2;
+    immed = v.con / 2;
   } else {
     addFixup(v.sym, currSeg, segPtr[currSeg], METHOD_R12, v.con);
     immed = 0;

@@ -5,10 +5,10 @@ float y = 2.4563;
 float z;
 
 int main(void) {
-  z = x - y;
-  printf("x - y = %2.4f\n",z);
   z = x + y;
   printf("x + y = %2.4f\n",z);
+  z = x - y;
+  printf("x - y = %2.4f\n",z);
   z = x * y;
   printf("x * y = %2.4f\n",z);
   z = x / y;
