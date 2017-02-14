@@ -25,6 +25,6 @@ Then either run a single test:
 The result will be in ./sort/result/sort.log.  
 The simulation output will be in ./sort/result/result.log.  
 Or run all tests:    
-> ./runalltest.sh  
+> ./runalltests.sh  
 
 A summary of the results will be in ./results.log.
