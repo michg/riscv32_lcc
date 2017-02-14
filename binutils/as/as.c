@@ -41,6 +41,7 @@
 #define TOK_AMPER	17
 #define TOK_BAR		18
 #define TOK_CARET	19
+#define TOK_DOTRELADR 	20
 
 #define STATUS_UNKNOWN	0	/* symbol is not yet defined */
 #define STATUS_DEFINED	1	/* symbol is defined */
@@ -258,6 +259,10 @@ int getNextToken(void) {
        return TOK_REGISTER;
      }
   }
+  if (*lineptr == '.' && *(lineptr + 1) == '+') {
+    lineptr+=2;
+    return TOK_DOTRELADR;
+  }
   if (isalpha((int) *lineptr) || *lineptr == '_' || *lineptr == '.') {
     p = tokenvalString;
     while (isalnum((int) *lineptr) || *lineptr == '_' || *lineptr == '.') {
@@ -336,7 +341,6 @@ int getNextToken(void) {
     *p = '\0';
     return TOK_STRING;
   }
-
   if (*lineptr == '+') {
     lineptr++;
     return TOK_PLUS;
@@ -1278,6 +1282,7 @@ void formatSB(unsigned int code) {
   getToken();
   expect(TOK_COMMA);
   getToken();
+  if(token == TOK_DOTRELADR) getToken();
   v = parseExpression();
   if (v.sym == NULL) {
     //immed = (v.con - ((signed) segPtr[currSeg] )) / 2;

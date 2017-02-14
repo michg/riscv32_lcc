@@ -453,10 +453,10 @@ reg:	CVFF4(reg)		"\t"	100
 reg:	CVIF4(reg)		"\tjal x1,int32_to_float32\n"	100
 reg:	CVFI4(reg)		"\tjal x1,float32_to_int32\n" 	100
 stmt:	EQF4(reg,reg)		"\tbeq x%0,x%1,%a\n"   1
-stmt:	LEF4(reg,reg)           "\tand x10,x%0,x%1\n\tsrli x10,x10,31\n\tbne x10,x0,12\n\tble x%0,x%1,%a\n\tbeq x0,x0,8\n\tble x%1,x%0,%a\n"   4
-stmt:	LTF4(reg,reg)           "\tand x10,x%0,x%1\n\tsrli x10,x10,31\n\tbne x10,x0,12\n\tblt x%0,x%1,%a\n\tbeq x0,x0,8\n\tblt x%1,x%0,%a\n"   4
-stmt:	GEF4(reg,reg)           "\tand x10,x%0,x%1\n\tsrli x10,x10,31\n\tbne x10,x0,12\n\tbge x%0,x%1,%a\n\tbeq x0,x0,8\n\tbge x%1,x%0,%a\n"   4
-stmt:	GTF4(reg,reg)           "\tand x10,x%0,x%1\n\tsrli x10,x10,31\n\tbne x10,x0,12\n\tbgt x%0,x%1,%a\n\tbeq x0,x0,8\n\tbgt x%1,x%0,%a\n"   4
+stmt:	LEF4(reg,reg)           "\tand x10,x%0,x%1\n\tsrli x10,x10,31\n\tbne x10,x0,.+12\n\tble x%0,x%1,%a\n\tbeq x0,x0,.+8\n\tble x%1,x%0,%a\n"   4
+stmt:	LTF4(reg,reg)           "\tand x10,x%0,x%1\n\tsrli x10,x10,31\n\tbne x10,x0,.+12\n\tblt x%0,x%1,%a\n\tbeq x0,x0,.+8\n\tblt x%1,x%0,%a\n"   4
+stmt:	GEF4(reg,reg)           "\tand x10,x%0,x%1\n\tsrli x10,x10,31\n\tbne x10,x0,.+12\n\tbge x%0,x%1,%a\n\tbeq x0,x0,.+8\n\tbge x%1,x%0,%a\n"   4
+stmt:	GTF4(reg,reg)           "\tand x10,x%0,x%1\n\tsrli x10,x10,31\n\tbne x10,x0,.+12\n\tbgt x%0,x%1,%a\n\tbeq x0,x0,.+8\n\tbgt x%1,x%0,%a\n"   4
 stmt:	NEF4(reg,reg)		"\tbne x%0,x%1,%a\n"   1
 
 
