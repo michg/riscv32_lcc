@@ -143,7 +143,7 @@ extern FILE __sF[];
 
 #include <common/_null.h>
 
-#define	BUFSIZ	10240
+#define	BUFSIZ	1024
 #define	EOF	(-1)
 
 #define	FOPEN_MAX	20	/* must be <= OPEN_MAX <sys/syslimits.h> */
