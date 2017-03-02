@@ -59,7 +59,7 @@ void error(char *fmt, ...) {
 #define STRING_START	(SYMTBL_START + execHeader.symsize)
 
 
-void dumpHeader(void) {
+void dumpHeader(int opt) {
   if (fseek(inFile, 0, SEEK_SET) < 0) {
     error("cannot seek to exec header");
   }
@@ -69,6 +69,7 @@ void dumpHeader(void) {
   if (execHeader.magic != EXEC_MAGIC) {
     error("wrong magic number in exec header");
   }
+  if(opt==0) {
   printf("Header\n");
   printf("    size of code         : %8u bytes\n", execHeader.csize);
   printf("    size of data         : %8u bytes\n", execHeader.dsize);
@@ -77,6 +78,7 @@ void dumpHeader(void) {
   printf("    size of data relocs  : %8u bytes\n", execHeader.drsize);
   printf("    size of symbol table : %8u bytes\n", execHeader.symsize);
   printf("    size of string space : %8u bytes\n", execHeader.strsize);
+  }
 }
 
 
@@ -248,6 +250,32 @@ void dumpSymbolTable(void) {
   }
 }
 
+void dumpUndefined(void) {
+  unsigned int currSize;
+  int n;
+  SymbolRecord symRec;
+
+  if (fseek(inFile, SYMTBL_START, SEEK_SET) < 0) {
+    error("cannot seek to symbol table section");
+  }
+  currSize = 0;
+  n = 0;
+  while (currSize < execHeader.symsize) {
+    if (fread(&symRec, sizeof(SymbolRecord), 1, inFile) != 1) {
+      error("cannot read symbol record");
+    }
+    if (symRec.type & MSB) {
+      dumpString(symRec.name);
+      printf("\n");
+    } else {
+      if (symRec.type < 0 || symRec.type > 3) {
+        error("type contains an illegal segment number");
+      }
+    }
+    currSize += sizeof(SymbolRecord);
+    n++;
+  }
+}
 
 /**************************************************************/
 
@@ -259,6 +287,7 @@ void usage(char *myself) {
   printf("         [-x]             dump code relocations\n");
   printf("         [-y]             dump data relocations\n");
   printf("         [-s]             dump symbol table\n");
+  printf("         [-u]             dump undefined symbols\n");
   printf("         [-a]             dump all\n");
   printf("         file             object file to be dumped\n");
   exit(1);
@@ -273,6 +302,7 @@ int main(int argc, char *argv[]) {
   int optionCodeRelocs;
   int optionDataRelocs;
   int optionSymbolTable;
+  int optionUndefined;
   char *inName;
 
   optionCode = 0;
@@ -280,6 +310,7 @@ int main(int argc, char *argv[]) {
   optionCodeRelocs = 0;
   optionDataRelocs = 0;
   optionSymbolTable = 0;
+  optionUndefined = 0;
   inName = NULL;
   for (i = 1; i < argc; i++) {
     argp = argv[i];
@@ -300,6 +331,9 @@ int main(int argc, char *argv[]) {
           break;
         case 's':
           optionSymbolTable = 1;
+          break;
+        case 'u':
+          optionUndefined = 1;
           break;
         case 'a':
           optionCode = 1;
@@ -325,7 +359,7 @@ int main(int argc, char *argv[]) {
   if (inFile == NULL) {
     error("cannot open input file '%s'", inName);
   }
-  dumpHeader();
+  dumpHeader(optionUndefined);
   if (optionCode) {
     dumpCode();
   }
@@ -340,6 +374,9 @@ int main(int argc, char *argv[]) {
   }
   if (optionSymbolTable) {
     dumpSymbolTable();
+  }
+  if (optionUndefined) {
+    dumpUndefined();
   }
   fclose(inFile);
   return 0;

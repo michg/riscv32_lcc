@@ -15,7 +15,7 @@
 #include "../include/a.out.h"
 
 
-#define TEMP_NAME		"__.SYMDEF"
+//#define TEMP_NAME		"__.SYMDEF"
 
 #define STRING_SIZE_INIT	1024
 #define STRING_SIZE_GROW	2
@@ -46,6 +46,8 @@ char firstName[MAX_NAME];
 
 ArHeader arhdr;
 ExecHeader exhdr;
+
+char symfilenam[MAX_NAME];
 
 
 /**************************************************************/
@@ -105,7 +107,7 @@ int nextMember(void) {
 }
 
 
-void addSymbol(unsigned int nameOffset) {
+void addSymbol(unsigned int nameOffset,char* filename) {
   long curPos;
   int c;
 
@@ -118,8 +120,19 @@ void addSymbol(unsigned int nameOffset) {
   numEntries++;
   curPos = ftell(fi);
   fseek(fi, curOff + sizeof(arhdr) + nameOffset, SEEK_SET);
-  do {
+  //do {
+  //  c = fgetc(fi);
+  //  storeCharacter(c);
+  //} while (c != 0) ;
+  c = fgetc(fi);
+  while (c != 0) {
+    storeCharacter(c);
     c = fgetc(fi);
+  }
+  storeCharacter(58); // :
+  do {
+    c = *filename;
+    filename++;
     storeCharacter(c);
   } while (c != 0) ;
   fseek(fi, curPos, SEEK_SET);
@@ -201,7 +214,56 @@ void showSymdefs(char *symdefs) {
   fclose(in);
 }
 
+char* getfileSymdefs(char* symdefs, char* symbol) {
+  FILE *in;
+  int numSymbols;
+  int i,j;
+  int len,res;
+  long pos;
+  char* ptr;
+  int c;
+  char symtab[MAX_SYM_ENTRIES][80];
 
+  in = fopen(symdefs, "r");
+  if (in == NULL) {
+    printf("error: cannot open symdef file '%s'\n", symdefs);
+    exit(1);
+  }
+  if (fread(&numSymbols, sizeof(int), 1, in) != 1) {
+    printf("cannot read symdef file\n");
+    exit(1);
+  }
+  //printf("%d symbols\n", numSymbols);
+  pos = sizeof(int) + numSymbols * sizeof(Entry);
+  fseek(in, pos, SEEK_SET);
+  for (i = 0; i < numSymbols; i++) {
+   j=0;
+   do {
+     c = fgetc(in);
+     symtab[i][j] = c;
+     j++;
+   } while (c != 0) ;
+   //fgets(&symtab[i][0], 80, in);
+   //printf("%s\n",&symtab[i][0]);
+  }
+  fclose(in);
+  i = 0;
+  do {
+   ptr = strchr(&symtab[i][0],':');
+   len = (int)(ptr - &symtab[i][0]);
+   res = strncmp(&symtab[i][0],symbol,len);
+   i++;
+  } while(res!=0 && i<=numSymbols);
+  if(i==(numSymbols+1)) {
+    printf("symbol not found in library\n");
+    exit(1);
+  }
+  ptr++;
+  strcpy(symfilenam,ptr);
+  //printf("%s",symfilenam);
+  return(symfilenam);
+
+}
 /**************************************************************/
 
 
@@ -285,7 +347,7 @@ int updateSymbols(char *archive, int verbose) {
       }
       if ((symbol.type & MSB) == 0) {
         /* this is an exported symbol */
-        addSymbol(stringStart + symbol.name);
+        addSymbol(stringStart + symbol.name,arhdr.name);
       }
     }
   } while (nextMember() != 0) ;
@@ -331,6 +393,6 @@ int updateSymbols(char *archive, int verbose) {
     args[2] = NULL;
     res = exec_rCmd(0, args);
   }
-  unlink(TEMP_NAME);
+  //unlink(TEMP_NAME);
   return res;
 }

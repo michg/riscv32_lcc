@@ -29,6 +29,8 @@
 
 char *com = "drqtpmx";
 char *opt = "vuabcls";
+char *symfilenam =  TEMP_NAME;
+
 
 int signums[] = { SIGHUP, SIGINT, SIGQUIT, 0 };
 
@@ -664,7 +666,9 @@ sk:
     mesg('c');
     copyFile(af, -1, IODD | SKIP);
     if (namc > 0 && !moreFiles()) {
-      done(0);
+      unlinkTempFiles();
+      return(0);
+      //done(0);
     }
   }
 }
@@ -761,7 +765,9 @@ int cmdCanChangeSymbols(void) {
 int main(int argc, char *argv[]) {
   int i;
   char *cp;
+  char* ptr;
   int res;
+  int cmdf = 0;
 
   for (i = 0; signums[i] != 0; i++) {
     if (signal(signums[i], SIG_IGN) != SIG_IGN) {
@@ -797,6 +803,19 @@ int main(int argc, char *argv[]) {
       case 'x':
         setcom(xCmd);
         break;
+      case 'f':
+        setcom(xCmd);
+        cmdf = 1;
+        arnam = argv[2];
+        namv = &symfilenam;
+        namc = 1;
+        (*comfun)();
+        ptr=getfileSymdefs(TEMP_NAME,argv[3]);
+        printf("%s",ptr);
+        namv = &ptr;
+        (*comfun)();
+        return(0);
+        break;
       case 'v':
       case 'u':
       case 'a':
@@ -828,6 +847,7 @@ int main(int argc, char *argv[]) {
   arnam = argv[2];
   namv = argv + 3;
   namc = argc - 3;
+
   if (comfun == NULL && !flg['s' - 'a']) {
     fprintf(stderr, "ar: one of [%ss] must be specified\n", com);
     done(1);
