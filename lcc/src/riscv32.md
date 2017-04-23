@@ -1025,6 +1025,37 @@ mulops_calls (int op)
   return 0;
 }
 
+static void stabinit(char *, int, char *[]);
+static void stabline(Coordinate *);
+extern void stabsym(Symbol);
+extern void stabtype(Symbol);
+extern void stabblock(int, int, Symbol*);
+extern void stabfend(Symbol, int);
+static char *currentfile;
+
+/* stabinit - initialize stab output */
+static void stabinit(char *file, int argc, char *argv[]) {
+        if (file) {
+                print("\t.file 1 \"%s\"\n", file);
+                currentfile = file;
+        }
+}
+
+/* stabline - emit stab entry for source coordinate *cp */
+static void stabline(Coordinate *cp) {
+        if (cp->file && cp->file != currentfile) {
+                print("\t.file 1 \"%s\"\n", cp->file);
+                currentfile = cp->file;
+        }
+        print("\t.loc 1 %d\n", cp->y);
+}
+
+/* stabsym - output a stab entry for symbol p */
+//static void stabsym(Symbol p) {
+//        if (p == cfunc && IR->stabline)
+//                (*IR->stabline)(&p->src);
+//}
+
 Interface riscv32IR = {
   1, 1, 0,      /* char */
   2, 2, 0,      /* short */
@@ -1061,7 +1092,7 @@ Interface riscv32IR = {
   progend,
   segment,
   space,
-  0, 0, 0, 0, 0, 0, 0,
+  stabblock, 0, stabfend, stabinit, stabline, stabsym, stabtype,
   {
     1,      /* max_unaligned_load */
     rmap,

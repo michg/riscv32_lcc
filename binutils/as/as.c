@@ -1,5 +1,5 @@
 /*
- * as.c -- ECO32 assembler
+ * as.c -- RISCV32 assembler
  */
 
 
@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "../include/a.out.h"
+#include "stab.h"
 
 
 /**************************************************************/
@@ -52,7 +53,12 @@
 
 #define MSB	((unsigned int) 1 << (sizeof(unsigned int) * 8 - 1))
 
-
+#define DBG_LINE 1
+#define DBG_FUNC 2
+#define DBG_VARGLO 3
+#define DBG_TYPEDEF 4
+#define DBG_VARLOCSTACK 5
+#define DBG_VARLOCREG 6
 /**************************************************************/
 
 
@@ -116,8 +122,11 @@ int debugToken = 0;
 int debugCode = 0;
 int debugFixup = 0;
 
+int debug = 0;
+
 char codeName[L_tmpnam];
 char dataName[L_tmpnam];
+char srcfileName[L_tmpnam];
 char *outName = NULL;
 char *inName = NULL;
 
@@ -127,6 +136,9 @@ FILE *outFile = NULL;
 FILE *inFile = NULL;
 
 char line[LINE_SIZE];
+char debuglabel[LINE_SIZE];
+char funcname[LINE_SIZE];
+char tmpstring[LINE_SIZE];
 char *lineptr;
 int lineno;
 
@@ -141,6 +153,7 @@ char *segName[4] = { "ABS", "CODE", "DATA", "BSS" };
 char *methodName[6] = { "W32" , "R12" , "RL12" , "RH20", "RS12","J20" };
 
 
+
 typedef struct fixup {
   int segment;			/* in which segment */
   unsigned int offset;		/* at which offset */
@@ -151,6 +164,17 @@ typedef struct fixup {
   struct fixup *next;		/* next fixup */
 } Fixup;
 
+typedef struct typeinfo {
+  char name[64][16];
+  int ispointer;
+  int isarray;
+  int arraysize;
+  int isstruct;
+  int reftype[16];
+  int offset[16];
+} Typeinfo;
+
+Typeinfo typetable[32];
 
 typedef struct symbol {
   char *name;			/* name of symbol */
@@ -161,9 +185,24 @@ typedef struct symbol {
   struct symbol *globref;	/* set if this local refers to a global */
   struct symbol *left;		/* left son in binary search tree */
   struct symbol *right;		/* right son in binary search tree */
-  int skip;			/* this symbol is not defined here nor is */
-				/* it used here: don't write to object file */
+  int skip;	                /* this symbol is not defined here nor is */
+                                /* it used here: don't write to object file */
+  int debug;
+  int debugtype;
+  int debugvalue;
 } Symbol;
+
+
+int str2int(char *p, unsigned int *num) {
+    *num = 0;
+    while (isdigit(*p)) {
+        if (*p > '9' || *p < '0')
+            return -1;
+        *num = *num * 10 + *p - '0';
+        p++;
+    }
+    return 0;
+}
 
 
 /**************************************************************/
@@ -238,12 +277,7 @@ int getNextToken(void) {
   }
   if (*lineptr == 'x') {
     lineptr++;
-    //if(*lineptr == 'o') {
-    // lineptr--;
-    //}
-    //else{
      if (!isdigit((int) *lineptr)) {
-       //error("register number expected after 'x' in line %d", lineno);
        lineptr--;
      }
      else {
@@ -561,10 +595,13 @@ Symbol *deref(Symbol *s) {
 }
 
 
-Symbol *newSymbol(char *name) {
+Symbol *newSymbol(char *name,int debug) {
   Symbol *p;
 
   p = allocateMemory(sizeof(Symbol));
+  if(debug)
+  p->name = allocateMemory(strlen(name) + 81);
+  else
   p->name = allocateMemory(strlen(name) + 1);
   strcpy(p->name, name);
   p->status = STATUS_UNKNOWN;
@@ -574,11 +611,14 @@ Symbol *newSymbol(char *name) {
   p->globref = NULL;
   p->left = NULL;
   p->right = NULL;
+  p->debug = debug;
+  p->debugtype = 0;
+  p->debugvalue = 0;
   return p;
 }
 
 
-Symbol *lookupEnter(char *name, int whichTable) {
+Symbol *lookupEnter(char *name, int whichTable, int debug) {
   Symbol *p, *q, *r;
   int cmp;
 
@@ -588,7 +628,7 @@ Symbol *lookupEnter(char *name, int whichTable) {
     p = localTable;
   }
   if (p == NULL) {
-    r = newSymbol(name);
+    r = newSymbol(name, debug);
     if (whichTable == GLOBAL_TABLE) {
       globalTable = r;
     } else {
@@ -608,7 +648,7 @@ Symbol *lookupEnter(char *name, int whichTable) {
       p = q->right;
     }
     if (p == NULL) {
-      r = newSymbol(name);
+      r = newSymbol(name, debug);
       if (cmp < 0) {
         q->left = r;
       } else {
@@ -625,8 +665,7 @@ static void linkSymbol(Symbol *s) {
   Symbol *global;
 
   if (s->status == STATUS_UNKNOWN) {
-    //error("undefined symbol '%s'", s->name);
-    global = lookupEnter(s->name, GLOBAL_TABLE);
+    global = lookupEnter(s->name, GLOBAL_TABLE, 0);
     while (s->fixups != NULL) {
       f = s->fixups;
       s->fixups = f->next;
@@ -793,7 +832,7 @@ Value parsePrimaryExpression(void) {
     getToken();
   } else
   if (token == TOK_IDENT) {
-    s = deref(lookupEnter(tokenvalString, LOCAL_TABLE));
+    s = deref(lookupEnter(tokenvalString, LOCAL_TABLE, 0));
     if (s->status == STATUS_DEFINED && s->segment == SEGMENT_ABS) {
       v.con = s->value;
       v.sym = NULL;
@@ -1023,6 +1062,205 @@ void dotBss(unsigned int code) {
 }
 
 
+
+void dotStabs(unsigned int code) {
+  Value u,v;
+  int n,k;
+  unsigned int i,j;
+  char *ptr, *ptr2;
+  char ch;
+  char name[64];
+  Symbol *label,*local;
+  expect(TOK_STRING);
+  strcpy(tmpstring,tokenvalString);
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  v = parseExpression();
+  n = strcspn(tmpstring, ":");
+  strncpy(name, tmpstring,n);
+  name[n] = '\0';
+  ptr=strchr(tmpstring, '=');
+  if(ptr) {
+    str2int(tmpstring+n+2, &i);
+    strcpy(typetable[i].name[0], name);
+    ptr=strchr(tmpstring, '=');
+    if (*(ptr+1)=='*') {
+      typetable[i].ispointer = 1;
+      str2int(ptr+2, &j);
+      typetable[i].reftype[0]=j;
+      strcpy(typetable[i].name[0], typetable[j].name[0]);
+      } else
+    typetable[i].ispointer = 0;
+    if (*(ptr+1)=='a') {
+      typetable[i].isarray = 1;
+      str2int(ptr+2, &j);
+      typetable[i].reftype[0]=j;
+      strcpy(typetable[i].name[0], typetable[j].name[0]);
+      ptr=strchr(tmpstring+n, ';');
+      ptr=strchr(ptr+1, ';');
+      str2int(ptr+1, &j);
+      typetable[i].arraysize=j+1;
+    } else
+    typetable[i].isarray = 0;
+    if (*(ptr+1)=='s') {
+      typetable[i].isstruct = 1;
+      ptr=strchr(ptr+1, ';');
+      ptr2=strchr(ptr, ':');
+      k = 1;
+      while(ptr2 != 0) {
+          strncpy(typetable[i].name[k], ptr+1, ptr2-ptr-1);
+          typetable[i].name[k][ptr2-ptr-1] = '\0';
+          str2int(ptr2+1, &j);
+          typetable[i].reftype[k] = j;
+          ptr2=strchr(ptr, ',');
+          str2int(ptr2+1, &j);
+          typetable[i].offset[k] = j;
+          ptr=strchr(ptr+1, ';');
+          ptr2=strchr(ptr, ':');
+          k++;
+      }
+    }
+    else
+      typetable[i].isstruct = 0;
+    if(*(ptr+1)=='d') {
+      str2int(ptr+2, &j);
+      n = sprintf(debuglabel,"typedef: %s ",(typetable[j].isstruct)?typetable[j].name[0]:name);
+      label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
+      label->status = STATUS_DEFINED;
+      label->segment = currSeg;
+      label->value = segPtr[currSeg];
+      label->debug = DBG_TYPEDEF;
+      label->debugtype = j;
+      label->debugvalue = 0;
+    }
+  } else {
+  }
+  expect(TOK_COMMA);
+  getToken();
+  u = parseExpression();
+  expect(TOK_COMMA);
+  getToken();
+  v = parseExpression();
+  expect(TOK_COMMA);
+  getToken();
+  if (token == TOK_IDENT) {
+     getToken();
+  } else {
+    v = parseExpression();
+  }
+  if(!ptr) {
+   ptr=strchr(tmpstring, ':');
+   ch=*(ptr+1);
+  switch(ch) {
+  case 'G': sprintf(debuglabel, "%s ", name);
+            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
+            local = deref(lookupEnter(name, LOCAL_TABLE, 0));
+            label->status = STATUS_DEFINED;
+            label->segment = currSeg;
+            label->value = local->value;
+            label->debug = DBG_VARGLO;
+            ptr+=2;
+            label->debugvalue = 0;
+            break;
+  case 'f':
+  case 'F': n=sprintf(debuglabel,"%s:",name);
+            strcpy(funcname,name);
+            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
+            if(label->status==STATUS_DEFINED) {
+              label->debugvalue = u.con;
+            } else {
+              label->status = STATUS_DEFINED;
+              label->segment = currSeg;
+              label->value = segPtr[currSeg];
+            }
+            label->debug = DBG_FUNC;
+            ptr+=2;
+            break;
+  case 'P':
+  case 'r': if(ch=='P') n = sprintf(debuglabel,"regparam: ");
+            else n = sprintf(debuglabel, "reglocal: ");
+            n += sprintf(debuglabel + n,"%s:", funcname);
+            sprintf(debuglabel + n,"%s ", name);
+            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
+            label->status = STATUS_DEFINED;
+            label->segment = currSeg;
+            label->value = segPtr[currSeg];
+            label->debug = DBG_VARLOCREG;
+            ptr+=2;
+            label->debugvalue = v.con;
+            break;
+  default:
+            if(ch=='p') {
+                  n = sprintf(debuglabel,"stackparam: ");
+                  ptr++;
+                } else n = sprintf(debuglabel, "stacklocal: ");
+                n += sprintf(debuglabel + n,"%s:", funcname);
+                sprintf(debuglabel + n,"%s ", name);
+                label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
+                label->status = STATUS_DEFINED;
+                label->segment = currSeg;
+                label->value = segPtr[currSeg];
+                label->debug = DBG_VARLOCSTACK;
+                ptr++;
+                label->debugvalue = v.con;
+                break;
+  }
+  str2int(ptr, &i);
+  label->debugtype = i;
+ }
+}
+
+void dotStabn(unsigned int code) {
+  Value v;
+  v = parseExpression();
+  expect(TOK_COMMA);
+  getToken();
+  v = parseExpression();
+  expect(TOK_COMMA);
+  getToken();
+  v = parseExpression();
+  expect(TOK_COMMA);
+  getToken();
+  if (token == TOK_IDENT) {
+  getToken();
+  } else {
+  v = parseExpression();
+  }
+}
+
+void dotFile(unsigned int code) {
+  Value v;
+  v = parseExpression();
+  if (v.sym != NULL) {
+    error("absolute expression expected in line %d", lineno);
+  }
+  expect(TOK_STRING);
+  strcpy(srcfileName,tokenvalString);
+  getToken();
+}
+
+void dotLoc(unsigned int code) {
+  Value v;
+  Symbol* label;
+  v = parseExpression();
+  if (v.sym != NULL) {
+    error("absolute expression expected in line %d", lineno);
+  }
+  v = parseExpression();
+  if (v.sym != NULL) {
+    error("absolute expression expected in line %d", lineno);
+  }
+  if(debug) {
+    sprintf(debuglabel,"\"%s\":%d",srcfileName,v.con);
+    label=deref(lookupEnter(debuglabel, GLOBAL_TABLE, 0));
+    label->status = STATUS_DEFINED;
+    label->segment = currSeg;
+    label->value = segPtr[currSeg];
+    label->debug = DBG_LINE;
+  }
+}
+
 void dotExport(unsigned int code) {
   Symbol *global;
   Symbol *local;
@@ -1030,12 +1268,12 @@ void dotExport(unsigned int code) {
 
   while (1) {
     expect(TOK_IDENT);
-    global = lookupEnter(tokenvalString, GLOBAL_TABLE);
+    global = lookupEnter(tokenvalString, GLOBAL_TABLE, 0);
     if (global->status != STATUS_UNKNOWN) {
       error("exported symbol '%s' multiply defined in line %d",
             global->name, lineno);
     }
-    local = lookupEnter(tokenvalString, LOCAL_TABLE);
+    local = lookupEnter(tokenvalString, LOCAL_TABLE, 0);
     if (local->status == STATUS_GLOBREF) {
       error("exported symbol '%s' multiply exported in line %d",
             local->name, lineno);
@@ -1067,8 +1305,8 @@ void dotImport(unsigned int code) {
 
   while (1) {
     expect(TOK_IDENT);
-    global = lookupEnter(tokenvalString, GLOBAL_TABLE);
-    local = lookupEnter(tokenvalString, LOCAL_TABLE);
+    global = lookupEnter(tokenvalString, GLOBAL_TABLE, 0);
+    local = lookupEnter(tokenvalString, LOCAL_TABLE, 0);
     if (local->status != STATUS_UNKNOWN) {
       error("imported symbol '%s' multiply defined in line %d",
             local->name, lineno);
@@ -1223,7 +1461,7 @@ void dotSet(unsigned int code) {
   Symbol *symbol;
 
   expect(TOK_IDENT);
-  symbol = deref(lookupEnter(tokenvalString, LOCAL_TABLE));
+  symbol = deref(lookupEnter(tokenvalString, LOCAL_TABLE, 0));
   if (symbol->status != STATUS_UNKNOWN) {
     error("symbol '%s' multiply defined in line %d",
           symbol->name, lineno);
@@ -1285,7 +1523,6 @@ void formatSB(unsigned int code) {
   if(token == TOK_DOTRELADR) getToken();
   v = parseExpression();
   if (v.sym == NULL) {
-    //immed = (v.con - ((signed) segPtr[currSeg] )) / 2;
     immed = v.con / 2;
   } else {
     addFixup(v.sym, currSeg, segPtr[currSeg], METHOD_R12, v.con);
@@ -1527,6 +1764,10 @@ Instr instrTable[] = {
   { ".half",   dotHalf,   0 },
   { ".word",   dotWord,   0 },
   { ".set",    dotSet,    0 },
+  { ".file",   dotFile,   0 },
+  { ".loc",    dotLoc,    0 },
+  { ".stabs",  dotStabs,  0 },
+  { ".stabn",  dotStabn,  0 },
 
   /* arithmetical instructions */
   { "add",     formatR, OP_ADD  },
@@ -1653,7 +1894,7 @@ void asmModule(void) {
     lineptr = line;
     getToken();
     while (token == TOK_LABEL) {
-      label = deref(lookupEnter(tokenvalString, LOCAL_TABLE));
+      label = deref(lookupEnter(tokenvalString, LOCAL_TABLE, 0));
       if (label->status != STATUS_UNKNOWN) {
         error("label '%s' multiply defined in line %d",
               label->name, lineno);
@@ -1832,7 +2073,7 @@ void writeDataRelocs(void) {
 
 void writeSymbol(Symbol *s) {
   SymbolRecord symRec;
-
+  int i;
   if (s->skip) {
     /* this symbol is neither defined here nor referenced here: skip */
     return;
@@ -1841,12 +2082,38 @@ void writeSymbol(Symbol *s) {
   if (s->status == STATUS_UNKNOWN) {
     symRec.type = MSB;
     symRec.value = 0;
+    symRec.debug = 0;
   } else {
     symRec.type = s->segment;
     symRec.value = s->value;
+    symRec.debug = s->debug;
   }
   fwrite(&symRec, sizeof(SymbolRecord), 1, outFile);
   symtblSize += sizeof(SymbolRecord);
+  if(s->debug==DBG_FUNC) {
+    sprintf(s->name+strlen(s->name), "%d ", s->debugvalue);
+  }
+  if(s->debugtype) {
+    strcat(s->name,"<");
+
+    if(typetable[s->debugtype].isstruct) {
+       for(i=1;typetable[s->debugtype].reftype[i]!=0;i++) {
+            sprintf(s->name+strlen(s->name), "%s", typetable[s->debugtype].name[i]);
+            strcat(s->name,":");
+            strcat(s->name, typetable[typetable[s->debugtype].reftype[i]].name[0]);
+            strcat(s->name,":");
+            sprintf(s->name+strlen(s->name),"%d",typetable[s->debugtype].offset[i]);
+            if(typetable[s->debugtype].reftype[i+1]!=0 )strcat(s->name,",");
+       }
+    } else strcat(s->name, typetable[s->debugtype].name[0]);
+
+    if(typetable[s->debugtype].ispointer) {strcat(s->name,"*"); }
+    if(typetable[s->debugtype].isarray) {sprintf(s->name+strlen(s->name),"[%d]",typetable[s->debugtype].arraysize); }
+    strcat(s->name,"> ");
+  }
+  if(s->debug==DBG_VARLOCSTACK || s->debug==DBG_VARLOCREG) {
+    sprintf(s->name+strlen(s->name), "@ 0x%08X\n", s->debugvalue);
+  }
   stringSize += strlen(s->name) + 1;
 }
 
@@ -1905,6 +2172,12 @@ int main(int argc, char *argv[]) {
           usage(argv[0]);
         }
         outName = argv[++i];
+        break;
+      case 'g':
+        if (i == argc - 1) {
+          usage(argv[0]);
+        }
+        debug = 1;
         break;
       default:
         usage(argv[0]);

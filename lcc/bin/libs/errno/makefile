@@ -23,4 +23,4 @@ $(BIN):$(ASRCS)
 	$(AS) -o $@ $^
 
 clean:
-		rm -f *~ $(OBJS) $(BIN)
+		rm -f *~ $(ASRCS) $(BIN)

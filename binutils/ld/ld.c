@@ -1,5 +1,5 @@
 /*
- * ld.c -- ECO32 linking loader
+ * ld.c -- RISCV32 linking loader
  */
 
 
@@ -25,7 +25,12 @@
 
 #define MSB	((unsigned int) 1 << (sizeof(unsigned int) * 8 - 1))
 
-
+#define DBG_LINE 1
+#define DBG_FUNC 2
+#define DBG_VARGLO 3
+#define DBG_TYPEDEF 4
+#define DBG_VARLOCSTACK 5
+#define DBG_VARLOCREG 6
 /**************************************************************/
 
 
@@ -33,9 +38,12 @@ int debugLink = 0;
 int debugFixup = 0;
 
 int withHeader = 1;
+int withDebug = 0;
 
 char codeName[L_tmpnam];
 char dataName[L_tmpnam];
+char debName[L_tmpnam];
+
 char *outName = NULL;
 char *mapName = NULL;
 char *inName = NULL;
@@ -43,6 +51,7 @@ char *inName = NULL;
 FILE *codeFile = NULL;
 FILE *dataFile = NULL;
 FILE *outFile = NULL;
+FILE *debFile =NULL;
 FILE *mapFile = NULL;
 FILE *inFile = NULL;
 
@@ -76,6 +85,7 @@ typedef struct symbol {
 				/* if symbol not defined: meaningless */
   struct symbol *left;		/* left son in binary search tree */
   struct symbol *right;		/* right son in binary search tree */
+  int debug;
 } Symbol;
 
 
@@ -101,6 +111,10 @@ void error(char *fmt, ...) {
   if (outFile != NULL) {
     fclose(outFile);
     outFile = NULL;
+  }
+  if (debFile != NULL) {
+    fclose(debFile);
+    debFile = NULL;
   }
   if (mapFile != NULL) {
     fclose(mapFile);
@@ -362,7 +376,7 @@ void relocateSegments(void) {
 Symbol *symbolTable = NULL;
 
 
-Symbol *newSymbol(char *name) {
+Symbol *newSymbol(char *name, int debug) {
   Symbol *p;
 
   p = allocateMemory(sizeof(Symbol));
@@ -372,17 +386,18 @@ Symbol *newSymbol(char *name) {
   p->value = 0;
   p->left = NULL;
   p->right = NULL;
+  p->debug = debug;
   return p;
 }
 
 
-Symbol *lookupEnter(char *name) {
+Symbol *lookupEnter(char *name, int debug) {
   Symbol *p, *q, *r;
   int cmp;
 
   p = symbolTable;
   if (p == NULL) {
-    r = newSymbol(name);
+    r = newSymbol(name, debug);
     symbolTable = r;
     return r;
   }
@@ -398,7 +413,7 @@ Symbol *lookupEnter(char *name) {
       p = q->right;
     }
     if (p == NULL) {
-      r = newSymbol(name);
+      r = newSymbol(name, debug);
       if (cmp < 0) {
         q->left = r;
       } else {
@@ -560,7 +575,7 @@ void readSymbols(void) {
       error("cannot read symbol table");
     }
     readString(symRec.name, strBuf, MAX_STRLEN);
-    sym = lookupEnter(strBuf);
+    sym = lookupEnter(strBuf, symRec.debug);
     if ((symRec.type & MSB) == 0) {
       /* the symbol is defined in this symbol record */
       if ((sym->type & MSB) == 0) {
@@ -649,6 +664,28 @@ void printToMapFile(void) {
           segStart[SEGMENT_BSS], segPtr[SEGMENT_BSS]);
 }
 
+void printdebSymbol(Symbol *s) {
+  switch (s->debug) {
+    /* debug symbol */
+    case DBG_LINE: fprintf(debFile, "line: %s @ 0x%08X\n", s->name, s->value+segStart[s->type]);
+                   break;
+    case DBG_FUNC: fprintf(debFile, "function: %s @ 0x%08X\n", s->name, s->value+segStart[s->type]);
+                   break;
+    case DBG_VARGLO: fprintf(debFile, "global: %s @ 0x%08X\n", s->name, s->value+segStart[s->type]);
+                     break;
+    case DBG_VARLOCSTACK: fprintf(debFile, "%s", s->name);      //local or locparam
+                          break;
+    case DBG_VARLOCREG: fprintf(debFile, "%s", s->name); // reglocal or regparam
+                        break;
+    case DBG_TYPEDEF: fprintf(debFile, "%s\n", s->name); // typedef
+                      break;
+    default: break;
+  }
+}
+
+void printToDebFile(void) {
+  walkSymbols(printdebSymbol);
+}
 
 /**************************************************************/
 
@@ -765,12 +802,14 @@ void usage(char *myself) {
 int main(int argc, char *argv[]) {
   int i;
   char *argp;
+  char* dot;
   unsigned int *ssp;
   int *ssdp;
 
   tmpnam(codeName);
   tmpnam(dataName);
   outName = "a.out";
+
   for (i = 1; i < argc; i++) {
     argp = argv[i];
     if (*argp != '-') {
@@ -780,6 +819,9 @@ int main(int argc, char *argv[]) {
     switch (*argp) {
       case 'h':
         withHeader = 0;
+        break;
+      case 'g':
+        withDebug = 1;
         break;
       case 'o':
         if (i == argc - 1) {
@@ -836,6 +878,15 @@ int main(int argc, char *argv[]) {
   if (outFile == NULL) {
     error("cannot open output file '%s'", outName);
   }
+  if(withDebug) {
+    strcpy(debName,outName);
+    dot = strrchr(debName, '.');
+    strcpy(dot, ".deb");
+    debFile = fopen(debName, "wt");
+    if (debFile == NULL) {
+      error("cannot open debug file '%s'", debName);
+    }
+  }
   if (mapName != NULL) {
     mapFile = fopen(mapName, "wt");
     if (mapFile == NULL) {
@@ -867,6 +918,9 @@ int main(int argc, char *argv[]) {
   writeData();
   if (mapFile != NULL) {
     printToMapFile();
+  }
+  if (debFile != NULL) {
+    printToDebFile();
   }
   if (codeFile != NULL) {
     fclose(codeFile);

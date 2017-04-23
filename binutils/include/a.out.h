@@ -48,6 +48,7 @@ typedef struct {
 				/* if MSB = 1: the symbol is undefined */
   int value;			/* if symbol defined: the symbol's value */
 				/* if symbol not defined: meaningless */
+  int debug;
 } SymbolRecord;
 
 

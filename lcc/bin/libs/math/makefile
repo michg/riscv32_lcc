@@ -28,4 +28,4 @@ $(BIN):$(OSRCS)
 	$(AR) -rsv $@ $^
 
 clean:
-		rm -f *~ $(OBJS) $(BIN)
+		rm -f *~ $(OSRCS) $(ASRCS) $(BIN)

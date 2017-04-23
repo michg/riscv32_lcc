@@ -1,3 +1,9 @@
+typedef struct uart {
+unsigned int dr;
+unsigned int sr;
+unsigned int ack;
+} UART;
+
 int find_max(int *arr, int size)
 {
   int res = 0, i;

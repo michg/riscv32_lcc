@@ -63,7 +63,8 @@ int option(char *arg) {
                 as[0] = concat(&arg[8], "/../../binutils/bin/as");
                 ld[0] = concat(&arg[8], "/../../binutils/bin/ld");
 		ld[6] = concat("-L", &arg[8]);
-	} else
+	} else if (strcmp(arg,"-g")==0);
+        else
 		return 0;
 	return 1;
 }

@@ -5,7 +5,7 @@ LCCDIR =../..
 CC = ${LCCDIR}/lcc
 AS = ${LCCDIR}/../../binutils/bin/as
 
-CFLAGS = -Wo-lccdir=${LCCDIR} -S -D__TCS_V2__ -D__MIPSEL__ -w -v
+CFLAGS = -Wo-lccdir=${LCCDIR} -S -D__TCS_V2__ -w -v
 
 
 CSRCS = $(wildcard *.c)
@@ -23,4 +23,4 @@ $(BIN):$(ASRCS)
 	$(AS) -o $@ $^
 
 clean:
-		rm -f *~ $(OBJS) $(BIN)
+		rm -f *~ $(ASRCS) $(BIN)
