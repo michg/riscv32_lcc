@@ -39,6 +39,7 @@ int debugFixup = 0;
 
 int withHeader = 1;
 int withDebug = 0;
+int rvc = 0;
 
 char codeName[L_tmpnam];
 char dataName[L_tmpnam];
@@ -88,6 +89,21 @@ typedef struct symbol {
   int debug;
 } Symbol;
 
+int signext32(int n, unsigned int val)
+{
+  int res = val | ((val & 2<<(n-1)) ? (0xFFFFFFFF & ((2<<n)-1)): 0);
+  return(res);
+}
+
+int insrange(int bits, int val) {
+  unsigned int msb = 1<<(bits-1);
+  int ll = -msb;
+  return((val<=(msb-1) && val>=ll) ? 1 : 0);
+}
+
+int rvcreg(int reg) {
+ return((reg>=8 && reg<=15)? 1 : 0);
+}
 
 /**************************************************************/
 
@@ -228,6 +244,9 @@ void fixupRef(Reloc *rel) {
   FILE *file;
   unsigned int value;
   unsigned int final;
+  unsigned int type, src1, src2, dst;
+  unsigned int rs1, rs2, bne;
+  int offset;
 
   /* determine the segment in which to do fixup */
   switch (rel->segment) {
@@ -268,11 +287,23 @@ void fixupRef(Reloc *rel) {
       fputc((final >> 24) & 0xFF, file);
       break;
     case METHOD_R12:
-      value = (rel->value - rel->offset) / 2;
+      value = (rel->value - rel->offset);
+      if((value&1)) error("jal not half word aligned");
       fseek(file, rel->offset, SEEK_SET);
       fread(&final, sizeof(final), 1, file);
-      value &= value & 0xFFF;
-      final |= (((value>>11)&1)<<31 |((value>>4)&0x3F)<<25 | (value&0xF)<<8 | ((value>>10)&1)<<7 );
+      rs1 = (final>>15) & 0x1F;
+      rs2 = (final>>20) & 0x1F;
+      value &= 0x1FFF;
+      offset = signext32(13, value);
+      type = (final>>14) & 1;
+      bne =  (final>>12) & 1;
+      if((rvc==0) || (rvcreg(rs1)==0) || (insrange(9, offset)==0) || type!=0 || rs2!=0 ) {
+      final |= (((value>>12)&1)<<31 |((value>>5)&0x3F)<<25 | ((value>>1)&0xF)<<8 | ((value>>11)&1)<<7 );
+      } else {
+      final = (3<<14 | bne<<13 | ((value>>8)&1)<<12 | ((value>>3)&3)<<10 | (rs1-8)<<7 | ((value>>6)&3)<<5 | ((value>>1)&3)<<3 | ((value>>5)&1)<<2 | 1 );
+      final &= 0xFFFF;
+      final |= 0x10000;
+      }
       fseek(file, rel->offset, SEEK_SET);
       fputc((final >> 0) & 0xFF, file);
       fputc((final >> 8) & 0xFF, file);
@@ -284,7 +315,17 @@ void fixupRef(Reloc *rel) {
       fseek(file, rel->offset, SEEK_SET);
       fread(&final, sizeof(final), 1, file);
       value &= 0xFFF;
-      final |= (value<<20);
+      offset = signext32(12, value);
+      src1 = (final>>15) & 0x1F;
+      dst = (final>>7) & 0x1F;
+      type = (final>>13) & 1;
+      if((rvc==0) || (insrange(7, offset)==0) || (rvcreg(dst)==0) || (rvcreg(src1)==0) || type==0)
+        final |= (value<<20);
+      else {
+        final = 2<<13 | ((value>>3)&0x7)<<10 | (src1-8)<<7 | ((value>>2)&0x1)<<6 | ((value>>6)&0x1)<<5 | (dst-8)<<2 | 0x0;
+        final &= 0xFFFF;
+        final |= 0x10000;
+      }
       fseek(file, rel->offset, SEEK_SET);
       fputc((final >> 0) & 0xFF, file);
       fputc((final >> 8) & 0xFF, file);
@@ -309,7 +350,17 @@ void fixupRef(Reloc *rel) {
       fseek(file, rel->offset, SEEK_SET);
       fread(&final, sizeof(final), 1, file);
       value &= 0xFFF;
-      final |= (value&0x1F)<<7 | (value>>5)<<25;
+      offset = signext32(12, value);
+      src1 = (final>>15) & 0x1F;
+      src2 = (final>>20) & 0x1F;
+      type = (final>>13) & 1;
+      if((rvc==0) || (insrange(7, offset)==0) || (rvcreg(src2)==0) || (rvcreg(src1)==0) || type==0)
+        final |= (value&0x1F)<<7 | (value>>5)<<25;
+      else {
+        final = 6<<13 | ((value>>3)&0x7)<<10 | (src1-8)<<7 | ((value>>2)&0x1)<<6 | ((value>>6)&0x1)<<5 | (src2-8)<<2 | 0x0;
+        final &= 0xFFFF;
+        final |= 0x10000;
+      }
       fseek(file, rel->offset, SEEK_SET);
       fputc((final >> 0) & 0xFF, file);
       fputc((final >> 8) & 0xFF, file);
@@ -317,11 +368,20 @@ void fixupRef(Reloc *rel) {
       fputc((final >> 24) & 0xFF, file);
       break;
     case METHOD_J20:
-      value = (rel->value - rel->offset) / 2;
+      value = (rel->value - rel->offset);
+      if((value&1)) error("jal not half word aligned");
       fseek(file, rel->offset, SEEK_SET);
       fread(&final, sizeof(final), 1, file);
-      value &= 0xFFFFF;
-      final |= ((value>>19)&0x1)<<31 | (value&0x3FF)<<21 | ((value>>10)&0x1)<<20 | ((value>>11)&0xFF)<<12;
+      value &= 0x1FFFFF;
+      offset = signext32(21, value);
+      dst = (final>>7) & 0x1F;
+      if((rvc==0) || (insrange(12, offset)==0) || dst!=1)
+        final |= ((value>>20)&0x1)<<31 | ((value>>1)&0x3FF)<<21 | ((value>>11)&0x1)<<20 | ((value>>12)&0xFF)<<12;
+      else {
+        final = 1<<13 | ((value>>11)&0x1)<<12 | ((value>>4)&0x1)<<11 |((value>>8)&0x3)<<9 | ((value>>10)&0x1)<<8 | ((value>>6)&0x1)<<7 | ((value>>7)&0x1)<<6 | ((value>>1)&0x7)<<3 | ((value>>5)&0x1)<<2 | 1;
+        final &= 0xFFFF;
+        final |= 0x10000;
+      }
       fseek(file, rel->offset, SEEK_SET);
       fputc((final >> 0) & 0xFF, file);
       fputc((final >> 8) & 0xFF, file);
@@ -858,6 +918,12 @@ int main(int argc, char *argv[]) {
           error("cannot read number given with option '-%s'", argp);
         }
         *ssdp = 1;
+        break;
+       case 'c':
+        if (i == argc - 1) {
+          usage(argv[0]);
+        }
+        rvc = 1;
         break;
       default:
         usage(argv[0]);

@@ -20,7 +20,7 @@ int main()
 
   i = 0;
   while (i < 9) {
-    j = 10;
+    j = 9;
     while (j >= i+1) {
       if (a[j] < a[j-1]) {
         tmp = a[j-1];

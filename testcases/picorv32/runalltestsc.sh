@@ -24,7 +24,7 @@ for name in */; do
     name=${name%/}
     rm  ./$name/result/*.*
     ${LCCDIR}/lcc -Wo-lccdir=${LCCDIR} -S -target=riscv32 ./$name/$name.c  -o ./$name/$name.s
-    ${BINUTILSDIR}/as -o ./$name/result/main.o  start.s ./$name/$name.s
+    ${BINUTILSDIR}/as -c -o ./$name/result/main.o  start.s ./$name/$name.s
     ${BINUTILSDIR}/dof -u ./$name/result/main.o > ./$name/result/main.res
     lib=$(<./$name/lib.txt)
     objs=$(<./$name/objs.txt)
@@ -33,7 +33,7 @@ for name in */; do
     then
         extract main.res ${lib}
     fi
-    ../../${BINUTILSDIR}/ld -h -m $name.mem -o $name.bin main.o ${olist} ${objs}
+    ../../${BINUTILSDIR}/ld -c -h -m $name.mem -o $name.bin main.o ${olist} ${objs}
     cd ../..
     python3 mkhex.py ./$name/result/$name
     cp ./$name/result/$name.hex ./firmware.mem

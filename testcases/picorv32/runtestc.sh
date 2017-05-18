@@ -20,8 +20,8 @@ done < $1
 }
 
 rm  ./$1/result/*.*
-${LCCDIR}/lcc -Wo-lccdir=${LCCDIR} -S -target=riscv32 ./$1/$1.c  -o ./$1/$1.s
-${BINUTILSDIR}/as -o ./$1/result/main.o  start.s ./$1/$1.s
+${LCCDIR}/lcc -g -Wo-lccdir=${LCCDIR} -S -g -target=riscv32 ./$1/$1.c  -o ./$1/$1.s
+${BINUTILSDIR}/as -c -g -o ./$1/result/main.o  start.s ./$1/$1.s
 ${BINUTILSDIR}/dof -u ./$1/result/main.o > ./$1/result/main.res
 lib=$(<./$1/lib.txt)
 objs=$(<./$1/objs.txt)
@@ -30,7 +30,7 @@ if [ ${lib} ]
 then
     extract main.res ${lib}
 fi
-../../${BINUTILSDIR}/ld -h -m $1.mem -o $1.bin main.o ${olist} ${objs}
+../../${BINUTILSDIR}/ld -c -g -h -m $1.mem -o $1.bin main.o ${olist} ${objs}
 cd ../..
 python3 mkhex.py ./$1/result/$1
 cp ./$1/result/$1.hex ./firmware.mem

@@ -83,13 +83,14 @@
 #define OP_BGEU		0x7
 #define OP_BLEU		0x17
 #define OP_ADDI		0x0
+#define OP_SLLI         0x1
 #define OP_NOP		0x8
 #define OP_ANDI		0x7
 #define OP_ORI		0x6
 #define OP_XORI		0x4
 #define OP_SLTI		0x2
 #define OP_SLTIU        0x3
-#define OP_SLLI         0x001
+//#define OP_SLLI         0x001
 #define OP_SRLI         0x005
 #define OP_SRAI         0x105
 #define OP_LB		0x00
@@ -123,6 +124,7 @@ int debugCode = 0;
 int debugFixup = 0;
 
 int debug = 0;
+int rvc = 0;
 
 char codeName[L_tmpnam];
 char dataName[L_tmpnam];
@@ -204,7 +206,26 @@ int str2int(char *p, unsigned int *num) {
     return 0;
 }
 
+int insrange(int bits, int val) {
+  int msb = 1<<(bits-1);
+  int ll = -msb;
+  return((val<=(msb-1) && val>=ll) ? 1 : 0);
+}
 
+int rvcreg(int reg) {
+ return((reg>=8 && reg<=15)? 1 : 0);
+}
+
+unsigned int countbits(int n)
+{
+    unsigned int count = 0;
+    while (n)
+    {
+      n &= (n-1) ;
+      count++;
+    }
+    return count;
+}
 /**************************************************************/
 
 
@@ -1212,20 +1233,19 @@ void dotStabs(unsigned int code) {
 }
 
 void dotStabn(unsigned int code) {
-  Value v;
-  v = parseExpression();
+  parseExpression();
   expect(TOK_COMMA);
   getToken();
-  v = parseExpression();
+  parseExpression();
   expect(TOK_COMMA);
   getToken();
-  v = parseExpression();
+  parseExpression();
   expect(TOK_COMMA);
   getToken();
   if (token == TOK_IDENT) {
   getToken();
   } else {
-  v = parseExpression();
+  parseExpression();
   }
 }
 
@@ -1504,6 +1524,44 @@ void formatR(unsigned int code) {
   emitWord(((code>>3)&0x7F) << 25 | src2 << 20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x33);
 }
 
+void formatR2(unsigned int code) {
+  int dst, src1, src2;
+
+  /* opcode with three register operands */
+  expect(TOK_REGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_REGISTER);
+  src1 = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_REGISTER);
+  src2 = tokenvalNumber;
+  getToken();
+  if(rvc==0 || (rvcreg(dst)==0) || (src2>15) || (src2<8) || src1!=dst)
+  emitWord(((code>>3)&0x7F) << 25 | src2 << 20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x33);
+  else
+  emitHalf(4<<13 | 3<<10 | (dst-8)<<7 | countbits(code&0x7)<<5 | (src2-8)<<2 | 0x1);
+}
+
+void formatRC2(unsigned int code) {
+  int dst, src2;
+
+  /* opcode with three register operands */
+  expect(TOK_REGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_REGISTER);
+  src2 = tokenvalNumber;
+  getToken();
+  emitHalf(4<<13 | 3<<10 | (dst-8)<<7 | countbits(code&0x7)<<5 | (src2-8)<<2 | 0x1);
+}
+
 void formatSB(unsigned int code) {
   int src1, src2, tmp;
   Value v;
@@ -1538,9 +1596,10 @@ void formatSB(unsigned int code) {
 }
 
 void formatS(unsigned int code) {
-  int src1, src2;
+  int src1, src2, vcon;
   Value v;
   unsigned int immed;
+  int rvccond;
 
   /* opcode with two registers and a 12 bit signed offset operand */
   expect(TOK_REGISTER);
@@ -1551,6 +1610,7 @@ void formatS(unsigned int code) {
   v = parseExpression();
   if (v.sym == NULL) {
     immed = v.con;
+    vcon = v.con;
     expect(TOK_LPAREN);
     getToken();
     expect(TOK_REGISTER);
@@ -1571,7 +1631,13 @@ void formatS(unsigned int code) {
     addFixup(v.sym, currSeg, segPtr[currSeg], METHOD_RS12, v.con);
     immed = 0;
   }
-  emitWord(((immed>>5)&0x3F)<<25 | src2<<20 | src1<<15 |(code&0x7)<<12| (immed&0x1F)<<7 | 0x23);
+  rvccond = (rvc!=0) && (v.sym==NULL) && (code==OP_SW);
+  if (rvccond && (rvcreg(src2)==1) && (rvcreg(src1)==1) && (insrange(7, vcon)==1) )
+    emitHalf(6<<13 | ((immed>>3)&0x7)<<10 | (src1-8)<<7 | ((immed>>2)&0x1)<<6 | ((immed>>6)&0x1)<<5 | (src2-8)<<2 | 0x0);
+  else if(rvccond && src1==2 && (insrange(8, vcon)==1))
+    emitHalf(6<<13 | ((immed>>2)&0xF)<<9 | ((immed>>6)&0x3)<<7 | src2<<2 | 0x2);
+  else
+   emitWord(((immed>>5)&0x3F)<<25 | src2<<20 | src1<<15 |(code&0x7)<<12| (immed&0x1F)<<7 | 0x23);
 }
 
 void formatIm(unsigned int code) {
@@ -1599,11 +1665,101 @@ void formatIm(unsigned int code) {
     src1 = 0;
     dst = 0;
   }
+  if(rvc==0 || (insrange(6,v.con)==0) || src1!=dst)
+    emitWord( immed<<20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x13);
+  else
+    emitHalf(((immed>>5)&0x1)<<12 | dst<<7 | (immed&0x1f)<<2 | (0x1+code));
+}
+
+void formatCIm(unsigned int code) {
+  int dst;
+  Value v;
+  unsigned int immed;
+
+  /* opcode with two register operands and immediate */
+  if((code&0x8)==0) {
+    expect(TOK_REGISTER);
+    dst = tokenvalNumber;
+    getToken();
+    expect(TOK_COMMA);
+    getToken();
+    v = parseExpression();
+    immed = v.con;
+    immed &= 0x3F;
+  } else {
+    immed = 0;
+    dst = 0;
+  }
+    emitHalf(((immed>>5)&0x1)<<12 | dst<<7 | (immed&0x1f)<<2 | (0x1+(code&1)));
+}
+
+void formatIm2(unsigned int code) {
+  int dst, src1;
+  Value v;
+  unsigned int immed;
+
+  /* opcode with two register operands and immediate */
+  expect(TOK_REGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_REGISTER);
+  src1 = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  v = parseExpression();
+  immed = v.con;
+  immed &= 0xFFF;
+
+  if(rvc==0 || immed>=64 || src1!=dst)
+    emitWord( immed<<20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x13);
+  else
+    emitHalf(4<<13 | ((immed>>5)&0x1)<<12 | dst<<7 | (immed&0x1f)<<2 | 0x1);
+}
+
+void formatCIm2(unsigned int code) {
+  int dst;
+  Value v;
+  unsigned int immed;
+
+  /* opcode with two register operands and immediate */
+  expect(TOK_REGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  v = parseExpression();
+  immed = v.con;
+  immed &= 0xFFF;
+  emitHalf(4<<13 | ((immed>>5)&0x1)<<12 | dst<<7 | (immed&0x1f)<<2 | 0x1);
+}
+
+void formatIm3(unsigned int code) {
+  int dst, src1;
+  Value v;
+  unsigned int immed;
+
+  /* opcode with two register operands and immediate */
+  expect(TOK_REGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_REGISTER);
+  src1 = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  v = parseExpression();
+  immed = v.con;
+  immed &= 0xFFF;
   emitWord( immed<<20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x13);
 }
 
 void formatLIm(unsigned int code) {
-  int dst, src1;
+  int dst, src1, vcon, rvccond;
   Value v;
   unsigned int immed;
 
@@ -1616,6 +1772,7 @@ void formatLIm(unsigned int code) {
   v = parseExpression();
   if (v.sym == NULL) {
     immed = v.con;
+    vcon = v.con;
     expect(TOK_LPAREN);
     getToken();
     expect(TOK_REGISTER);
@@ -1632,7 +1789,13 @@ void formatLIm(unsigned int code) {
     immed = 0;
     src1 = dst;
   }
-  emitWord( immed<<20 | src1 << 15 | ((code>>4)&0x7)<<12 | dst<<7 | (code&0xF)<<3 | 0x3);
+  rvccond = (rvc!=0) && (v.sym==NULL) && (code==OP_LW);
+   if( rvccond && (rvcreg(dst)==1) && (rvcreg(src1)==1) && (insrange(7, vcon)==1))
+    emitHalf(2<<13 | ((immed>>3)&0x7)<<10 | (src1-8)<<7 | ((immed>>2)&0x1)<<6 | ((immed>>6)&0x1)<<5 | (dst-8)<<2 | 0x0);
+   else if( rvccond && (src1==2) && (insrange(8, vcon)==1))
+    emitHalf(2<<13 | ((immed>>5)&0x1)<<12 | dst<<7 | ((immed>>2)&0x7)<<4 | ((immed>>6)&0x3)<<2 | 0x2);
+   else
+    emitWord( immed<<20 | src1 << 15 | ((code>>4)&0x7)<<12 | dst<<7 | (code&0xF)<<3 | 0x3);
 }
 
 void formatSIm(unsigned int code) {
@@ -1654,7 +1817,27 @@ void formatSIm(unsigned int code) {
   v = parseExpression();
   immed = v.con;
   immed &= 0x1F;
+  if((rvc==0) || (rvcreg(dst)==0) || (src1!=dst))
   emitWord(((code>>3)&0x7F) << 25 | immed<<20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x13);
+  else
+  emitHalf(4<<13 | ((immed>>5)&0x1)<<12 | ((code>>8)&0x1)<<10 |  (dst-8)<<7 | (immed&0x1f)<<2 | 0x1);
+}
+
+void formatSCIm(unsigned int code) {
+  int dst;
+  Value v;
+  unsigned int immed;
+
+  /* shift opcode with two register operands and immediate */
+  expect(TOK_REGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  v = parseExpression();
+  immed = v.con;
+  immed &= 0x1F;
+  emitHalf(4<<13 | ((immed>>5)&0x1)<<12 | ((code>>8)&0x1)<<10 |  (dst-8)<<7 | (immed&0x1f)<<2 | 0x1);
 }
 
 void formatUJ(unsigned int code) {
@@ -1709,13 +1892,19 @@ void formatLI(unsigned int code) {
   getToken();
   v = parseExpression();
   immed = v.con;
-  if((((immed & 0x800)==0) && ((immed & 0xFFFFF000)!=0)) ||
-     (((immed & 0x800)!=0) && ((immed & 0xFFFFF000)!=0xFFFFF000))){
+  if(insrange(12, v.con)==0) {
     if((immed & 0x800)!=0) immed+=0x1000;
+    if(rvc==0 ||
+    insrange(18, v.con)==0) {
     emitWord( (immed&0xFFFFF000) | dst<<7 | 0x37);
+    } else
+    emitHalf( 0x3<<13| ((immed>>17)&0x1)<<12 | dst<<7 | ((immed>>12)&0x1F)<<2 | 0x1);
     src = dst;
   }
+  if(rvc==0 || insrange(6, v.con)==0) {
   if((immed & 0xFFF)!=0) emitWord( (immed&0xFFF)<<20 | src << 15 | (code&0x7)<<12 | dst<<7 | 0x13);
+  } else
+  if((immed & 0x3F)!=0) emitHalf( 0x2<<13| ((immed>>5)&0x1)<<12 | dst<<7 | (immed&0x1F)<<2 | 0x1);
 }
 
 void formatLUI(unsigned int code) {
@@ -1737,7 +1926,8 @@ void formatLUI(unsigned int code) {
 void formatBRK(unsigned int code) {
 
    /* BREAK */
-  emitWord( 1<<20 | 0x73);
+  if(rvc==0) emitWord( 1<<20 | 0x73);
+  else emitHalf( 9<<12 | 0x2);
 }
 
 typedef struct instr {
@@ -1771,15 +1961,19 @@ Instr instrTable[] = {
 
   /* arithmetical instructions */
   { "add",     formatR, OP_ADD  },
-  { "sub",     formatR, OP_SUB  },
+  { "sub",     formatR2, OP_SUB  },
+  { "c.sub",   formatRC2, OP_SUB  },
     /* shift instructions */
   { "sll",     formatR, OP_SLL  },
   { "srl",     formatR, OP_SRL  },
   { "sra",     formatR, OP_SRA  },
     /* logical instructions */
-  { "and",     formatR, OP_AND  },
-  { "or",      formatR, OP_OR   },
-  { "xor",     formatR, OP_XOR  },
+  { "and",     formatR2, OP_AND  },
+  { "c.and",   formatRC2, OP_AND  },
+  { "or",      formatR2, OP_OR   },
+  { "c.or",    formatRC2, OP_OR   },
+  { "xor",     formatR2, OP_XOR  },
+  { "c.xor",   formatRC2, OP_XOR  },
   { "slt",     formatR, OP_SLT  },
   { "sltu",    formatR, OP_SLTU },
   /* branch instructions */
@@ -1797,10 +1991,15 @@ Instr instrTable[] = {
   { "jalr",    formatJR, OP_JALR  },
   /* immediate instructions */
   { "addi",    formatIm, OP_ADDI  },
+  { "c.addi",  formatCIm, OP_ADDI  },
   { "nop",     formatIm, OP_NOP   },
-  { "andi",    formatIm, OP_ANDI  },
-  { "ori",     formatIm, OP_ORI   },
-  { "xori",    formatIm, OP_XORI  },
+  { "c.nop",   formatCIm, OP_NOP   },
+  { "slli",    formatIm, OP_SLLI },
+  { "c.slli",  formatCIm, OP_SLLI },
+  { "andi",    formatIm2, OP_ANDI  },
+  { "c.andi",  formatCIm2, OP_ANDI  },
+  { "ori",     formatIm3, OP_ORI   },
+  { "xori",    formatIm3, OP_XORI  },
   { "slti",    formatIm, OP_SLTI  },
   { "sltiu",   formatIm, OP_SLTIU },
   { "sltiu",   formatIm, OP_SLTIU },
@@ -1812,13 +2011,16 @@ Instr instrTable[] = {
   { "la",      formatLIm, OP_LA    },
   { "li",      formatLI, OP_LUI   },
   { "lui",     formatLUI, OP_LUI   },
-  { "slli",    formatSIm, OP_SLLI },
+ // { "slli",    formatSIm, OP_SLLI },
   { "srli",    formatSIm, OP_SRLI },
+  { "c.srli",  formatSCIm, OP_SRLI },
   { "srai",    formatSIm, OP_SRAI },
+  { "c.srai",    formatSCIm, OP_SRAI },
   { "sb",      formatS, OP_SB    },
   { "sh",      formatS, OP_SH    },
   { "sw",      formatS, OP_SW    },
   { "ebreak",  formatBRK, OP_BRK },
+  { "c.ebreak",  formatBRK, OP_BRK },
   { "mul",     formatR, OP_MUL  },
   { "mulh",    formatR, OP_MULH  },
   { "mulhsu",  formatR, OP_MULHSU  },
@@ -1868,15 +2070,16 @@ Instr *lookupInstr(char *name) {
 
 
 void roundupSegments(void) {
-  while (segPtr[SEGMENT_CODE] & 3) {
+int rounding = (rvc)? 1 : 3;
+  while (segPtr[SEGMENT_CODE] & rounding) {
     fputc(0, codeFile);
     segPtr[SEGMENT_CODE] += 1;
   }
-  while (segPtr[SEGMENT_DATA] & 3) {
+  while (segPtr[SEGMENT_DATA] & rounding) {
     fputc(0, dataFile);
     segPtr[SEGMENT_DATA] += 1;
   }
-  while (segPtr[SEGMENT_BSS] & 3) {
+  while (segPtr[SEGMENT_BSS] & rounding) {
     segPtr[SEGMENT_BSS] += 1;
   }
 }
@@ -2178,6 +2381,12 @@ int main(int argc, char *argv[]) {
           usage(argv[0]);
         }
         debug = 1;
+        break;
+      case 'c':
+        if (i == argc - 1) {
+          usage(argv[0]);
+        }
+        rvc = 1;
         break;
       default:
         usage(argv[0]);
