@@ -24,6 +24,7 @@
 #define PAGE_ROUND(n)	(((n) + PAGE_SIZE - 1) & ~PAGE_MASK)
 
 #define MSB	((unsigned int) 1 << (sizeof(unsigned int) * 8 - 1))
+#define SEGALIGN 4
 
 #define DBG_LINE 1
 #define DBG_FUNC 2
@@ -87,7 +88,15 @@ typedef struct symbol {
   struct symbol *left;		/* left son in binary search tree */
   struct symbol *right;		/* right son in binary search tree */
   int debug;
+  int rvcdelta;
 } Symbol;
+
+typedef struct lelem {
+  unsigned int val;
+  struct lelem *next;
+} Lelem;
+
+void updatesymbols(void);
 
 int signext32(int n, unsigned int val)
 {
@@ -176,7 +185,8 @@ void freeMemory(void *p) {
 
 
 Reloc *relocs = NULL;
-
+Lelem *clist = NULL;
+Lelem *dlist = NULL;
 
 void addReloc(int segment, RelocRecord *relRec, Symbol **symMap) {
   Reloc *rel;
@@ -239,14 +249,74 @@ void linkSymbols(void) {
   }
 }
 
+Lelem *newLelem(int val) {
+  Lelem *p;
+  p = allocateMemory(sizeof(Lelem));
+  p->next = NULL;
+  p->val = val;
+  return p;
+}
 
-void fixupRef(Reloc *rel) {
+
+int insertlist(int number) {
+ Lelem *p, *q, *r;
+ int pos;
+ p = clist;
+ q = NULL;
+ pos = 1;
+ while((p!=NULL) && (number>p->val)) {
+  q = p;
+  p = p->next;
+  pos++;
+  }
+ r = newLelem(number);
+ r->next = p;
+ if(q!=NULL) q->next = r; else clist=r;
+ return(pos);
+}
+
+int getpos(int number) {
+ Lelem *p;
+ int pos=1;
+ p=clist;
+ while((p!=NULL) && (number!=p->val)) {
+  p = p->next;
+  pos++;
+  }
+  if(p==NULL) return(-1); else return(pos);
+}
+
+int getmaxpos(int number) {
+ Lelem *p;
+ int pos=1;
+ p=clist;
+ while((p!=NULL) && (number>p->val)) {
+  p = p->next;
+  pos++;
+  }
+  return(pos-1);
+}
+
+void fixupRef(Reloc *rel, int scan) {
   FILE *file;
   unsigned int value;
   unsigned int final;
   unsigned int type, src1, src2, dst;
   unsigned int rs1, rs2, bne;
   int offset;
+  int rvcmatch=0;
+  int rvcdelta=0;
+  int deltadst=0,deltaofs=0;
+
+  if(scan==0){
+    if(rel->segment==SEGMENT_CODE) deltaofs = 2*getmaxpos(rel->offset);
+    else deltaofs = 0;
+    if(rel->base.segment==SEGMENT_CODE)
+      deltadst = 2*getmaxpos(rel->value);
+    else
+      deltadst=2*getmaxpos(segStart[SEGMENT_DATA])&~(SEGALIGN-1);
+    rvcdelta = deltadst-deltaofs;
+   }
 
   /* determine the segment in which to do fixup */
   switch (rel->segment) {
@@ -278,16 +348,18 @@ void fixupRef(Reloc *rel) {
   switch (rel->method) {
 
     case METHOD_W32:
-      value = rel->value + segStart[rel->base.segment];
+      value = rel->value + segStart[rel->base.segment] - rvcdelta;
       final = value;
-      fseek(file, rel->offset, SEEK_SET);
-      fputc((final >> 0) & 0xFF, file);
-      fputc((final >> 8) & 0xFF, file);
-      fputc((final >> 16) & 0xFF, file);
-      fputc((final >> 24) & 0xFF, file);
+      if(scan==0) {
+       fseek(file, rel->offset, SEEK_SET);
+       fputc((final >> 0) & 0xFF, file);
+       fputc((final >> 8) & 0xFF, file);
+       fputc((final >> 16) & 0xFF, file);
+       fputc((final >> 24) & 0xFF, file);
+      }
       break;
     case METHOD_R12:
-      value = (rel->value - rel->offset);
+      value = (rel->value - rel->offset - rvcdelta);
       if((value&1)) error("jal not half word aligned");
       fseek(file, rel->offset, SEEK_SET);
       fread(&final, sizeof(final), 1, file);
@@ -303,15 +375,18 @@ void fixupRef(Reloc *rel) {
       final = (3<<14 | bne<<13 | ((value>>8)&1)<<12 | ((value>>3)&3)<<10 | (rs1-8)<<7 | ((value>>6)&3)<<5 | ((value>>1)&3)<<3 | ((value>>5)&1)<<2 | 1 );
       final &= 0xFFFF;
       final |= 0x10000;
+      rvcmatch = 1;
       }
-      fseek(file, rel->offset, SEEK_SET);
-      fputc((final >> 0) & 0xFF, file);
-      fputc((final >> 8) & 0xFF, file);
-      fputc((final >> 16) & 0xFF, file);
-      fputc((final >> 24) & 0xFF, file);
+      if(scan==0) {
+       fseek(file, rel->offset, SEEK_SET);
+       fputc((final >> 0) & 0xFF, file);
+       fputc((final >> 8) & 0xFF, file);
+       fputc((final >> 16) & 0xFF, file);
+       fputc((final >> 24) & 0xFF, file);
+      }
       break;
     case METHOD_RL12:
-      value = rel->value - rel->offset + 4 + segStart[rel->base.segment] - segStart[rel->segment];
+      value = rel->value - rel->offset  - rvcdelta + 4 + segStart[rel->base.segment] - segStart[rel->segment];
       fseek(file, rel->offset, SEEK_SET);
       fread(&final, sizeof(final), 1, file);
       value &= 0xFFF;
@@ -325,28 +400,33 @@ void fixupRef(Reloc *rel) {
         final = 2<<13 | ((value>>3)&0x7)<<10 | (src1-8)<<7 | ((value>>2)&0x1)<<6 | ((value>>6)&0x1)<<5 | (dst-8)<<2 | 0x0;
         final &= 0xFFFF;
         final |= 0x10000;
+        rvcmatch = 1;
       }
-      fseek(file, rel->offset, SEEK_SET);
-      fputc((final >> 0) & 0xFF, file);
-      fputc((final >> 8) & 0xFF, file);
-      fputc((final >> 16) & 0xFF, file);
-      fputc((final >> 24) & 0xFF, file);
+      if(scan==0) {
+       fseek(file, rel->offset, SEEK_SET);
+       fputc((final >> 0) & 0xFF, file);
+       fputc((final >> 8) & 0xFF, file);
+       fputc((final >> 16) & 0xFF, file);
+       fputc((final >> 24) & 0xFF, file);
+      }
       break;
     case METHOD_RH20:
-      value = rel->value - rel->offset + segStart[rel->base.segment] - segStart[rel->segment];
+      value = rel->value - rel->offset - rvcdelta + segStart[rel->base.segment] - segStart[rel->segment];
       fseek(file, rel->offset, SEEK_SET);
       fread(&final, sizeof(final), 1, file);
       if((value & 0x800)!=0) value+=0x1000;
       value &= 0xFFFFF000;
       final |= value;
-      fseek(file, rel->offset, SEEK_SET);
-      fputc((final >> 0) & 0xFF, file);
-      fputc((final >> 8) & 0xFF, file);
-      fputc((final >> 16) & 0xFF, file);
-      fputc((final >> 24) & 0xFF, file);
+      if(scan == 0) {
+       fseek(file, rel->offset, SEEK_SET);
+       fputc((final >> 0) & 0xFF, file);
+       fputc((final >> 8) & 0xFF, file);
+       fputc((final >> 16) & 0xFF, file);
+       fputc((final >> 24) & 0xFF, file);
+      }
       break;
     case METHOD_RS12:
-      value = rel->value - rel->offset + 4 + segStart[rel->base.segment] - segStart[rel->segment];
+      value = rel->value - rel->offset  - rvcdelta + 4 + segStart[rel->base.segment] - segStart[rel->segment];
       fseek(file, rel->offset, SEEK_SET);
       fread(&final, sizeof(final), 1, file);
       value &= 0xFFF;
@@ -360,15 +440,18 @@ void fixupRef(Reloc *rel) {
         final = 6<<13 | ((value>>3)&0x7)<<10 | (src1-8)<<7 | ((value>>2)&0x1)<<6 | ((value>>6)&0x1)<<5 | (src2-8)<<2 | 0x0;
         final &= 0xFFFF;
         final |= 0x10000;
+        rvcmatch = 1;
       }
-      fseek(file, rel->offset, SEEK_SET);
-      fputc((final >> 0) & 0xFF, file);
-      fputc((final >> 8) & 0xFF, file);
-      fputc((final >> 16) & 0xFF, file);
-      fputc((final >> 24) & 0xFF, file);
+      if(scan==0) {
+       fseek(file, rel->offset, SEEK_SET);
+       fputc((final >> 0) & 0xFF, file);
+       fputc((final >> 8) & 0xFF, file);
+       fputc((final >> 16) & 0xFF, file);
+       fputc((final >> 24) & 0xFF, file);
+      }
       break;
     case METHOD_J20:
-      value = (rel->value - rel->offset);
+      value = (rel->value - rel->offset - rvcdelta );
       if((value&1)) error("jal not half word aligned");
       fseek(file, rel->offset, SEEK_SET);
       fread(&final, sizeof(final), 1, file);
@@ -381,23 +464,29 @@ void fixupRef(Reloc *rel) {
         final = 1<<13 | ((value>>11)&0x1)<<12 | ((value>>4)&0x1)<<11 |((value>>8)&0x3)<<9 | ((value>>10)&0x1)<<8 | ((value>>6)&0x1)<<7 | ((value>>7)&0x1)<<6 | ((value>>1)&0x7)<<3 | ((value>>5)&0x1)<<2 | 1;
         final &= 0xFFFF;
         final |= 0x10000;
+        rvcmatch = 1;
       }
-      fseek(file, rel->offset, SEEK_SET);
-      fputc((final >> 0) & 0xFF, file);
-      fputc((final >> 8) & 0xFF, file);
-      fputc((final >> 16) & 0xFF, file);
-      fputc((final >> 24) & 0xFF, file);
+      if(scan==0) {
+       fseek(file, rel->offset, SEEK_SET);
+       fputc((final >> 0) & 0xFF, file);
+       fputc((final >> 8) & 0xFF, file);
+       fputc((final >> 16) & 0xFF, file);
+       fputc((final >> 24) & 0xFF, file);
+      }
       break;
     default:
       /* this should never happen */
       error("illegal method in doFixup()");
       break;
   }
+  if(rvcmatch && scan==1) {
+   insertlist((rel->offset)+2);
+  }
   /* output debugging info */
   if (debugFixup) {
-    printf("DEBUG: fixup (s:%s, o:%08X, m:%s, v:%08X), %08X --> %08X\n",
+    printf("DEBUG: fixup (s:%s, o:%08X, m:%s, v:%08X), %08X --> %08X,delta %i, dst %i, ofs %i\n",
            segName[rel->segment], rel->offset, methodName[rel->method],
-           rel->value, value, final);
+           rel->value, value, final, rvcdelta, deltadst, deltaofs);
   }
 }
 
@@ -421,10 +510,16 @@ void relocateSegments(void) {
     segStartDefined[SEGMENT_BSS] = 1;
   }
   /* fixup all references (which now are only relative to segments) */
+  rel = relocs;
+  while (rel != NULL) {
+    fixupRef(rel, 1);
+    rel = rel->next;
+  }
+  updatesymbols();
   while (relocs != NULL) {
     rel = relocs;
     relocs = rel->next;
-    fixupRef(rel);
+    fixupRef(rel, 0);
     freeMemory(rel);
   }
 }
@@ -447,6 +542,7 @@ Symbol *newSymbol(char *name, int debug) {
   p->left = NULL;
   p->right = NULL;
   p->debug = debug;
+  p->rvcdelta = 0;
   return p;
 }
 
@@ -483,6 +579,8 @@ Symbol *lookupEnter(char *name, int debug) {
     }
   }
 }
+
+
 
 
 void walkTree(Symbol *s, void (*fp)(Symbol *sp)) {
@@ -709,6 +807,7 @@ void printSymbol(Symbol *s) {
     }
   }
   fprintf(mapFile, "0x%08X", s->value);
+  fprintf(mapFile, "-0x%08X", s->rvcdelta);
   fprintf(mapFile, "\n");
 }
 
@@ -747,6 +846,14 @@ void printToDebFile(void) {
   walkSymbols(printdebSymbol);
 }
 
+void updatesymbol(Symbol *s) {
+  s->rvcdelta=2*getmaxpos(s->value);
+}
+
+void updatesymbols(void) {
+  walkSymbols(updatesymbol);
+}
+
 /**************************************************************/
 
 
@@ -769,28 +876,34 @@ void writeHeader(void) {
 
 void writeCode(void) {
   int data;
-
+  int pos=0;
   rewind(codeFile);
   while (1) {
     data = fgetc(codeFile);
     if (data == EOF) {
       break;
     }
-    fputc(data, outFile);
+    if(getpos(pos)==-1)
+     fputc(data, outFile);
+    else {
+     data = fgetc(codeFile);
+     pos++;
+    }
+    pos++;
   }
 }
 
 
 void writeData(void) {
-  int data;
-
+  int i, data = 0;
   rewind(dataFile);
+  for(i=0;i<(2*getmaxpos(segStart[SEGMENT_DATA])&(SEGALIGN-1));i++) fputc(data, outFile);;
   while (1) {
     data = fgetc(dataFile);
     if (data == EOF) {
       break;
     }
-    fputc(data, outFile);
+     fputc(data, outFile);
   }
 }
 
