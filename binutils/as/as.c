@@ -1664,11 +1664,16 @@ void formatIm(unsigned int code) {
     immed = 0;
     src1 = 0;
     dst = 0;
+    v.con = 0;
   }
-  if(rvc==0 || (insrange(6,v.con)==0) || src1!=dst)
-    emitWord( immed<<20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x13);
+  if(rvc==1 && (insrange(6,v.con)!=0) && src1==dst)
+    emitHalf(((immed>>5)&0x1)<<12 | dst<<7 | (immed&0x1f)<<2 | (0x1+(code&0x7)));
+  else if(rvc==1 && (rvcreg(dst)==1) && ((immed&0xfffffc03)==0) && src1==2 && code==0)
+    emitHalf( ((immed>>4)&0x3)<<11  | ((immed>>6)&0xf)<<7  | ((immed>>2)&0x1)<<6 | ((immed>>3)&0x1)<<5 | (dst-8)<<2 | 0);
+  else if(rvc==1 && dst==2 && src1==2 && (insrange(10, v.con)==1) && ((immed&0xf)==0) && code==0)
+    emitHalf(3<<13 | ((immed>>9)&0x1)<<12 | 2<<7 | ((immed>>4)&0x1)<<6   | ((immed>>6)&0x1)<<5  | ((immed>>7)&0x3)<<3 | ((immed>>5)&0x1)<<2 | 1);
   else
-    emitHalf(((immed>>5)&0x1)<<12 | dst<<7 | (immed&0x1f)<<2 | (0x1+code));
+    emitWord( immed<<20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x13);
 }
 
 void formatCIm(unsigned int code) {

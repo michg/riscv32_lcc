@@ -309,7 +309,12 @@ void fixupRef(Reloc *rel, int scan) {
   int deltadst=0,deltaofs=0;
 
   if(scan==0){
-    if(rel->segment==SEGMENT_CODE) deltaofs = 2*getmaxpos(rel->offset);
+    if(rel->segment==SEGMENT_CODE) {
+    switch (rel->method) {
+      case METHOD_RL12: case METHOD_RS12: deltaofs = 2*getmaxpos(rel->offset-4);break;
+      default: deltaofs = 2*getmaxpos(rel->offset);
+      }
+    }
     else deltaofs = 0;
     if(rel->base.segment==SEGMENT_CODE)
       deltadst = 2*getmaxpos(rel->value);
