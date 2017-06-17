@@ -330,7 +330,7 @@ class DebugCli(cmd.Cmd):
             return
         if(Rsp.reason == BRKPOINT):
             pc = Rsp._get_register(32)
-            Rsp._set_register(pc - 4, 0)
+            Rsp._set_register(32,pc - 4)
             print("BRK")
         Rsp.sendpkt("c")
         Rsp.state = RUNNING
@@ -425,8 +425,7 @@ class DebugCli(cmd.Cmd):
         curfunc = lastfunc
         lastline = Rsp.curline
         while Rsp.curline==lastline or curfunc!=lastfunc:
-            Rsp.sendpkt("s")
-            Rsp.process_stop_status()
+            self.do_si("")
             curfunc = Rsp._get_proc(Rsp.pc)
     
     
