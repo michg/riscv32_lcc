@@ -256,54 +256,19 @@ con:	CNSTU4			"%a"
 
 stmt:	reg			""
 
-scon:	ADDRGP4			"%a"
 
-saddr:	ADDI4(scon,con)		"%0+%1"
-saddr:	ADDP4(scon,con)		"%0+%1"
-saddr:	ADDU4(scon,con)		"%0+%1"
-saddr:  scon "%0"
 
-reg:	saddr			"\tla x%c,%0\n"	1
-reg:    con                     "\tli x%c,%0\n" 1
-stmt:	ASGNI1(saddr,reg)	"\tsb x%1,%0,x10\n"	1
-stmt:	ASGNI2(saddr,reg)	"\tsh x%1,%0,x10\n"	1
-stmt:	ASGNI4(saddr,reg)	"\tsw x%1,%0,x10\n"	1
-stmt:	ASGNP4(saddr,reg)	"\tsw x%1,%0,x10\n"	1
-stmt:	ASGNU1(saddr,reg)	"\tsb x%1,%0,x10\n"	1
-stmt:	ASGNU2(saddr,reg)	"\tsh x%1,%0,x10\n"	1
-stmt:	ASGNU4(saddr,reg)	"\tsw x%1,%0,x10\n"	1
-reg:	INDIRI1(saddr)		"\tlb x%c,%0\n"	1
-reg:	INDIRI2(saddr)		"\tlh x%c,%0\n"	1
-reg:	INDIRI4(saddr)		"\tlw x%c,%0\n"	1
-reg:	INDIRP4(saddr)		"\tlw x%c,%0\n"	1
-reg:	INDIRU1(saddr)		"\tlbu x%c,%0\n"	1
-reg:	INDIRU2(saddr)		"\tlhu x%c,%0\n"	1
-reg:	INDIRU4(saddr)		"\tlw x%c,%0\n"	1
-reg:	CVII4(INDIRI1(saddr))	"\tlb x%c,%0\n"	1
-reg:	CVII4(INDIRI2(saddr))	"\tlh x%c,%0\n"	1
-reg:	CVUU4(INDIRU1(saddr))	"\tlbu x%c,%0\n"	1
-reg:	CVUU4(INDIRU2(saddr))	"\tlhu x%c,%0\n"	1
-reg:	CVUI4(INDIRU1(saddr))	"\tlbu x%c,%0\n"	1
-reg:	CVUI4(INDIRU2(saddr))	"\tlhu x%c,%0\n"	1
+lab:   ADDRGP4     "%a"
+reg:	lab			"\tla x%c,%0\n"	1
+reg:    con         "\tli x%c,%0\n" 1
 
-acon12: CNSTP4 "%a" range(a,0,4095)
-acon12: CNSTP4 "\tauipc x%c,(%a>>12) "   1
-
-addr:	acon12			"%0(x0)"
 addr:	reg			"0(x%0)"
-addr:	ADDRFP4			"%a+%F(x2)"
-addr:	ADDRLP4			"%a+%F(x2)"
+addr:	ADDRFP4			"%a(x8)"
+addr:	ADDRLP4			"%a(x8)"
 
-reg:    ADDRFP4			"\taddi x%c,x2,%a+%F\n" 1
-reg:    ADDRLP4			"\taddi x%c,x2,%a+%F\n" 1
+reg:    ADDRFP4			"\taddi x%c,x8,%a\n" 1
+reg:    ADDRLP4			"\taddi x%c,x8,%a\n" 1
 
-reg:	CNSTI1			"# reg\n"		range(a, 0, 0)
-reg:	CNSTI2			"# reg\n"		range(a, 0, 0)
-reg:	CNSTI4			"# reg\n"		range(a, 0, 0)
-reg:	CNSTP4			"# reg\n"		range(a, 0, 0)
-reg:	CNSTU1			"# reg\n"		range(a, 0, 0)
-reg:	CNSTU2			"# reg\n"		range(a, 0, 0)
-reg:	CNSTU4			"# reg\n"		range(a, 0, 0)
 
 stmt:	ASGNI1(addr,reg)	"\tsb x%1,%0\n"	1
 stmt:	ASGNI2(addr,reg)	"\tsh x%1,%0\n"	1
@@ -338,46 +303,45 @@ reg: MODU4(reg,reg)  "\tremu x%c,x%0,x%1\n"  1
 reg: MULI4(reg,reg)  "\tmul x%c,x%0,x%1\n"   1
 reg: MULU4(reg,reg)  "\tmul x%c,x%0,x%1\n"   1
 
-con12: CNSTI4 "%a" range(a,-2048,2047)
-con12: CNSTU4 "%a" range(a,0,4095)
+cons12: CNSTI4 "%a" range(a,-2048,2047)
 
 reg: ADDI4(reg,reg)   "\tadd x%c,x%0,x%1\n"  1
-reg: ADDI4(reg,con12) "\taddi x%c,x%0,%1\n"  1
+reg: ADDI4(reg,cons12) "\taddi x%c,x%0,%1\n"  1
 reg: ADDP4(reg,reg)   "\tadd x%c,x%0,x%1\n"  1
-reg: ADDP4(reg,con12) "\taddi x%c,x%0,%1\n"  1
+reg: ADDP4(reg,CVIU4(cons12)) "\taddi x%c,x%0,%1\n"  1
 reg: ADDU4(reg,reg)   "\tadd x%c,x%0,x%1\n"  1
-reg: ADDU4(reg,con12) "\taddi x%c,x%0,%1\n"  1
+reg: ADDU4(reg,CVIU4(cons12)) "\taddi x%c,x%0,%1\n"  1
 
 reg: BANDI4(reg,reg)  "\tand x%c,x%0,x%1\n"   1
-reg: BANDI4(reg,con12)  "\tandi x%c,x%0,%1\n"   1
+reg: BANDI4(reg,cons12)  "\tandi x%c,x%0,%1\n"   1
 reg: BORI4(reg,reg)   "\tor x%c,x%0,x%1\n"    1
-reg: BORI4(reg,con12)   "\tori x%c,x%0,%1\n"    1
+reg: BORI4(reg,cons12)   "\tori x%c,x%0,%1\n"    1
 reg: BXORI4(reg,reg)  "\txor x%c,x%0,x%1\n"   1
-reg: BXORI4(reg,con12)  "\txori x%c,x%0,%1\n"   1
+reg: BXORI4(reg,cons12)  "\txori x%c,x%0,%1\n"   1
 
 reg: BANDU4(reg,reg)  "\tand x%c,x%0,x%1\n"   1
-reg: BANDU4(reg,con12)  "\tandi x%c,x%0,%1\n"   1
+reg: BANDU4(reg,CVIU4(cons12))  "\tandi x%c,x%0,%1\n"   1
 reg: BORU4(reg,reg)   "\tor x%c,x%0,x%1\n"    1
-reg: BORU4(reg,con12)   "\tori x%c,x%0,%1\n"    1
+reg: BORU4(reg,CVIU4(cons12))   "\tori x%c,x%0,%1\n"    1
 reg: BXORU4(reg,reg)  "\txor x%c,x%0,x%1\n"   1
-reg: BXORU4(reg,con12)  "\txori x%c,x%0,%1\n"   1
+reg: BXORU4(reg,CVIU4(cons12))  "\txori x%c,x%0,%1\n"   1
 reg: SUBI4(reg,reg)   "\tsub x%c,x%0,x%1\n"  1
-reg: SUBI4(reg,con12)   "\taddi x%c,x%0,-%1\n"  1
+reg: SUBI4(reg,cons12)   "\taddi x%c,x%0,-%1\n"  1
 reg: SUBP4(reg,reg)   "\tsub x%c,x%0,x%1\n"  1
-reg: SUBP4(reg,con12)   "\taddi x%c,x%0,-%1\n"  1
+reg: SUBP4(reg,cons12)   "\taddi x%c,x%0,-%1\n"  1
 reg: SUBU4(reg,reg)   "\tsub x%c,x%0,x%1\n"  1
-reg: SUBU4(reg,con12)   "\taddi x%c,x%0,-%1\n"  1
+reg: SUBU4(reg,CVIU4(cons12))   "\taddi x%c,x%0,-%1\n"  1
 reg: NEGI4(reg)   "\tsub x%c,x0,x%0\n" 1
 reg: BCOMI4(reg)   "\txori x%c,x%0,-1\n" 1
 reg: BCOMU4(reg)   "\txori x%c,x%0,-1\n" 1
 
-con5:	CNSTI4			"%a"			range(a, 0, 31)
+con5:	CNSTU4			"%a"			range(a, 0, 31)
 
-reg:	LSHI4(reg,con5)		"\tslli x%c,x%0,%1\n"	1
+reg:	LSHI4(reg,CVUI4(con5))		"\tslli x%c,x%0,%1\n"	1
 reg:	LSHI4(reg,reg)		"\tsll x%c,x%0,x%1\n"	1
 reg:	LSHU4(reg,con5)		"\tslli x%c,x%0,%1\n"	1
 reg:	LSHU4(reg,reg)		"\tsll x%c,x%0,x%1\n"	1
-reg:	RSHI4(reg,con5)		"\tsrai x%c,x%0,%1\n"	1
+reg:	RSHI4(reg,CVUI4(con5))		"\tsrai x%c,x%0,%1\n"	1
 reg:	RSHI4(reg,reg)		"\tsra x%c,x%0,x%1\n"	1
 reg:	RSHU4(reg,con5)		"\tsrli x%c,x%0,%1\n"	1
 reg:	RSHU4(reg,reg)		"\tsrl x%c,x%0,x%1\n"	1
@@ -397,7 +361,7 @@ reg:	CVUI4(reg)  "\tslli x%c,x%0,8*(4-%a)\n\tsrli x%c,x%c,8*(4-%a)\n"  2
 reg:	CVUU4(reg)  "\tslli x%c,x%0,8*(4-%a)\n\tsrli x%c,x%c,8*(4-%a)\n"  2
 
 stmt: LABELV  "%a:\n"
-stmt: JUMPV(scon)  "\tjal x0,%0\n"   1
+stmt: JUMPV(lab)  "\tjal x0,%0\n"   1
 stmt: JUMPV(reg)   "\tjalr x0,x%0,0\n"  1
 
 stmt: EQI4(reg,reg)  "\tbeq x%0,x%1,%a\n"   1
@@ -413,7 +377,7 @@ stmt: LTU4(reg,reg)  "\tbltu x%0,x%1,%a\n"  1
 stmt: NEI4(reg,reg)  "\tbne x%0,x%1,%a\n"   1
 stmt: NEU4(reg,reg)  "\tbne x%0,x%1,%a\n"   1
 
-lab:   ADDRGP4     "%a"
+
 reg:  CALLF4(lab)  "\tjal x1,%0\n"  1
 
 reg:  CALLI4(lab)  "\tjal x1,%0\n"  1
@@ -607,13 +571,12 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
       q->type = p->type;
     }
   }
-  assert(caller[i] == NULL);
-  offset = 0;
+  assert(caller[i] == NULL);  
+  offset = 4;
   gencode(caller, callee);
   if (ncalls != 0) {
     usedmask[IREG] |= ((unsigned) 1) << 1;
   }
-  //usedmask[IREG] &= 0x80FF0000;
   usedmask[IREG] &= 0x0FFC0002;
   usedmask[FREG] &= 0xFFF00000;
   maxargoffset = roundup(maxargoffset, 4);
@@ -621,10 +584,12 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
     maxargoffset = 24;
   }
   sizeisave = 4 * bitcount(usedmask[IREG]);
-  framesize = roundup(maxargoffset + sizeisave + maxoffset, 16);
+  framesize = roundup(maxargoffset + sizeisave + maxoffset , 16);
   segment(CODE);
   print("\t.align\t4\n");
   print("%s:\n", f->x.name);
+  print("\tsw  x8,-4(x2)\n");
+  print("\tmv  x8,x2\n");
   if (framesize > 0) {
     print("\taddi x2,x2,-%d\n", framesize);
   }
@@ -648,21 +613,21 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
       if (out->sclass == REGISTER &&
           (isint(out->type) || out->type == in->type)) {
         int outn = out->x.regnode->number;
-        print("\tadd x%d,x0,x%d\n", outn, rn);
+        print("\tmv x%d,x%d\n", outn, rn);
       } else {
-        int off = in->x.offset + framesize;
+        int off = in->x.offset;
         int n = (in->type->size + 3) / 4;
         int i;
         for (i = rn; i < rn + n; i++) {
-          print("\tsw x%d,%d(x2)\n", i, off + (i - rn) * 4);
+          print("\tsw x%d,%d(x8)\n", i, off + (i - rn) * 4);
         }
       }
     }
   }
   if (variadic(f->type) && callee[i - 1] != NULL) {
     i = callee[i - 1]->x.offset + callee[i - 1]->type->size;
-    for (i = roundup(i, 4)/4; i < 6; i++) {
-      print("\tsw x%d,%d(x2)\n", i + 12, framesize + 4 * i);
+	for (i = roundup(i, 4)/4; i < 6; i++) {
+      print("\tsw x%d,%d(x8)\n", i + 12, 4 * i);
     }
   }
   emitcode();
@@ -673,9 +638,8 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
       saved += 4;
     }
   }
-  if (framesize > 0) {
-    print("\taddi x2,x2,%d\n", framesize);
-  }
+  print("\tmv  x2,x8\n");
+  print("\tlw  x8,-4(x2)\n");  
   print("\tjalr x0,x1,0\n");
   print("\n");
 }

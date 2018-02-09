@@ -1637,7 +1637,7 @@ void formatS(unsigned int code) {
   else if(rvccond && src1==2 && (insrange(8, vcon)==1))
     emitHalf(6<<13 | ((immed>>2)&0xF)<<9 | ((immed>>6)&0x3)<<7 | src2<<2 | 0x2);
   else
-   emitWord(((immed>>5)&0x3F)<<25 | src2<<20 | src1<<15 |(code&0x7)<<12| (immed&0x1F)<<7 | 0x23);
+   emitWord(((immed>>5)&0x7F)<<25 | src2<<20 | src1<<15 |(code&0x7)<<12| (immed&0x1F)<<7 | 0x23);
 }
 
 void formatIm(unsigned int code) {
@@ -1675,6 +1675,23 @@ void formatIm(unsigned int code) {
   else
     emitWord( immed<<20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x13);
 }
+
+void formatMv(unsigned int code) {
+  int dst, src1;
+  
+  /* opcode with two registers */
+  expect(TOK_REGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_REGISTER);
+  src1 = tokenvalNumber;
+  getToken();
+  
+  emitWord( src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x13);
+}
+
 
 void formatCIm(unsigned int code) {
   int dst;
@@ -1996,6 +2013,7 @@ Instr instrTable[] = {
   { "jalr",    formatJR, OP_JALR  },
   /* immediate instructions */
   { "addi",    formatIm, OP_ADDI  },
+  { "mv",    formatMv, OP_ADDI  },
   { "c.addi",  formatCIm, OP_ADDI  },
   { "nop",     formatIm, OP_NOP   },
   { "c.nop",   formatCIm, OP_NOP   },
