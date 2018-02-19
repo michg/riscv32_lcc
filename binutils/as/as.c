@@ -1924,7 +1924,7 @@ void formatLI(unsigned int code) {
     src = dst;
   }
   if(rvc==0 || insrange(6, v.con)==0) {
-  if((immed & 0xFFF)!=0) emitWord( (immed&0xFFF)<<20 | src << 15 | (code&0x7)<<12 | dst<<7 | 0x13);
+    emitWord( (immed&0xFFF)<<20 | src << 15 | (code&0x7)<<12 | dst<<7 | 0x13);
   } else
   if((immed & 0x3F)!=0) emitHalf( 0x2<<13| ((immed>>5)&0x1)<<12 | dst<<7 | (immed&0x1F)<<2 | 0x1);
 }
