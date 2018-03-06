@@ -114,7 +114,12 @@
 #define OP_DIVU         0x00D
 #define OP_REM          0x00E
 #define OP_REMU         0x00F
-
+#define OP_CNTCYC       0x00
+#define OP_CNTCYCH      0x80
+#define OP_CNTTIME      0x01
+#define OP_CNTTIMEH     0x81
+#define OP_CNTINST      0x02
+#define OP_CNTINSTH     0x82
 
 /**************************************************************/
 
@@ -1952,6 +1957,14 @@ void formatBRK(unsigned int code) {
   else emitHalf( 9<<12 | 0x2);
 }
 
+void formatC(unsigned int code) {
+  int dst;
+  expect(TOK_REGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  emitWord( 0xC0<<24 |code<<20 | 2<<12 | dst<<7 | 0x73);
+}
+
 typedef struct instr {
   char *name;
   void (*func)(unsigned int code);
@@ -2051,8 +2064,13 @@ Instr instrTable[] = {
   { "div",     formatR, OP_DIV  },
   { "divu",    formatR, OP_DIVU  },
   { "rem",     formatR, OP_REM  },
-  { "remu",     formatR, OP_REMU  }
-
+  { "remu",    formatR, OP_REMU  },
+  { "rdcycle", formatC, OP_CNTCYC},
+  { "rdcycleh",formatC, OP_CNTCYCH},
+  { "rdtime",  formatC, OP_CNTTIME},
+  { "rdtimeh", formatC, OP_CNTTIMEH},
+  { "rdinstret",formatC, OP_CNTINST},
+  { "rdinstreth",formatC, OP_CNTINSTH}
 };
 
 
