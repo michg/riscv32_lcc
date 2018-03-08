@@ -34,18 +34,29 @@
 /* Platform dependent macros and functions needed to be modified           */
 /*-------------------------------------------------------------------------*/
 
-
+extern unsigned int rdcyc();
 
 
 #define spibase 0x40000000
-#define	CS_H(); // not used in simulation
-#define CS_L(); // not used in simulation
+#define freq 50000000
 
+void CS_H()
+{
+*((BYTE *)(spibase+4))=1;
+}
 
-
+void CS_L()
+{
+*((BYTE *)(spibase+4))=0;
+}
 
 dly_us(UINT n)
 {
+UINT val, start;
+start = rdcyc();
+val = start + n*(freq/1000000);
+if(val>start) while(rdcyc()<val);
+else while(rdcyc()>val);
 }
 
 void initspi()
@@ -55,8 +66,8 @@ void initspi()
 
 BYTE writereadbytespi(BYTE val)
 {
- *((BYTE *)spibase)=val;
- return(*(BYTE *)spibase);
+ *((BYTE *)(spibase+8))=val;
+ return(*(BYTE *)(spibase+8));
 }
 
 
