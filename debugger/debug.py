@@ -127,9 +127,8 @@ def read_debug_symbols(module):
              local_var.setdefault(proc, {})[var] = (res, parse_typedesc(line), 'stacklocal')
 
          elif split[0] == 'function:':
-             name, framesize = split[1].split(':')
-             proc_address[name] = address
-             proc_framesize[name] = int(framesize)
+             name = split[1]
+             proc_address[name] = address             
 
          elif split[0] == 'regparam:': 
              proc, var = split[1].split(':')
@@ -145,8 +144,8 @@ def read_debug_symbols(module):
 
 
 def load_debug_information(module):
-    global typedef, local_var, global_var, proc_address, proc_framesize, address_proc, address_line, line_address, srcname
-    typedef, local_var, global_var, proc_address, address_line, line_address, proc_framesize = {}, {}, {}, {}, {}, {}, {}
+    global typedef, local_var, global_var, proc_address, address_proc, address_line, line_address, srcname
+    typedef, local_var, global_var, proc_address, address_line, line_address = {}, {}, {}, {}, {}, {}
     maxline = 0
     srcname = module + '.c'
     read_debug_symbols(module)
@@ -500,15 +499,14 @@ class DebugCli(cmd.Cmd):
                 vartype = local_var[curfunc][var][INDTYPE][INDTYPETYPE][0]
                 if(local_var[curfunc][var][2].find('stack') != -1):
                     ofs = local_var[curfunc][var][INDADR]
-                    curstack = Rsp._get_register(2);
-                    framesize = proc_framesize[curfunc]
+                    curbase = Rsp._get_register(8);                    
                     ptr = local_var[curfunc][var][INDTYPE][INDTYPEPTR]
                     if(ptr>0):
                         size = PTRSIZE
                         vartype = PTRTYPE
                     else:
                         size = fmts[vartype][1]
-                    adr = curstack + ofs +framesize;
+                    adr = curbase + ofs;
                     if(index != 0):
                         adr+=index*size
                     Rsp.sendpkt("m %x,%x"%(adr,size),3)

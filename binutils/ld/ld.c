@@ -16,7 +16,7 @@
 /**************************************************************/
 
 
-#define MAX_STRLEN	200
+#define MAX_STRLEN	400
 
 #define PAGE_SHIFT	12
 #define PAGE_SIZE	(1 << PAGE_SHIFT)

@@ -21,60 +21,26 @@ extern void stabline(Coordinate *);
 extern void stabsym(Symbol);
 extern void stabtype(Symbol);
 
-static void asgncode(Type, int);
 static void dbxout(Type);
 static int dbxtype(Type);
-static int emittype(Type, int, int);
+static void emittype(Type);
 
-/* asgncode - assign type code to ty */
-static void asgncode(Type ty, int lev) {
-	if (ty->x.marked || ty->x.typeno)
-		return;
-	ty->x.marked = 1;
-	switch (ty->op) {
-	case VOLATILE: case CONST: case VOLATILE+CONST:
-		asgncode(ty->type, lev);
-		ty->x.typeno = ty->type->x.typeno;
-		break;
-	case POINTER: case FUNCTION: case ARRAY:
-		asgncode(ty->type, lev + 1);
-		/* fall thru */
-	case VOID: case INT: case UNSIGNED: case FLOAT:
-		break;
-	case STRUCT: case UNION: {
-		Field p;
-		for (p = fieldlist(ty); p; p = p->link)
-			asgncode(p->type, lev + 1);
-		/* fall thru */
-	case ENUM:
-		if (ty->x.typeno == 0)
-			ty->x.typeno = ++ntypes;
-		if (lev > 0 && (*ty->u.sym->name < '0' || *ty->u.sym->name > '9'))
-			dbxout(ty);
-		break;
-		}
-	default:
-		assert(0);
-	}
-}
 
 /* dbxout - output .stabs entry for type ty */
 static void dbxout(Type ty) {
 	ty = unqual(ty);
-	if (!ty->x.printed) {
-		int col = 0;
-		print("\t.stabs \""), col += 8;
+	if (!ty->x.printed) {		
+		print("\t.stabs \"");
 		if (ty->u.sym && !(isfunc(ty) || isarray(ty) || isptr(ty)))
-			print("%s", ty->u.sym->name), col += strlen(ty->u.sym->name);
-		print(":%c", isstruct(ty) || isenum(ty) ? 'T' : 't'), col += 2;
-		emittype(ty, 0, col);
+			print("%s", ty->u.sym->name);
+		print(":%c", isstruct(ty) || isenum(ty) ? 'T' : 't');
+		emittype(ty);
 		print("\",%d,0,0,0\n", N_LSYM);
 	}
 }
 
 /* dbxtype - emit a stabs entry for type ty, return type code */
-static int dbxtype(Type ty) {
-	asgncode(ty, 0);
+static int dbxtype(Type ty) {	
 	dbxout(ty);
 	return ty->x.typeno;
 }
@@ -86,146 +52,96 @@ static int dbxtype(Type ty) {
  * struct, union, and enum types. Continuations are not emitted for other types,
  * even if the definition is long. lev is the depth of calls to emittype.
  */
-static int emittype(Type ty, int lev, int col) {
+static void emittype(Type ty) {
 	int tc = ty->x.typeno;
 
 	if (isconst(ty) || isvolatile(ty)) {
-		col = emittype(ty->type, lev, col);
+		emittype(ty->type);
 		ty->x.typeno = ty->type->x.typeno;
 		ty->x.printed = 1;
-		return col;
+		return;
 	}
 	if (tc == 0) {
 		ty->x.typeno = tc = ++ntypes;
-/*              fprint(2,"`%t'=%d\n", ty, tc); */
 	}
-	print("%d", tc), col += 3;
+	print("%d", tc);
 	if (ty->x.printed)
-		return col;
+		return;
 	ty->x.printed = 1;
 	switch (ty->op) {
 	case VOID:	/* void is defined as itself */
-		print("=%d", tc), col += 1+3;
+		print("=%d", tc);
 		break;
-	case INT:
-		if (ty == chartype)	/* plain char is a subrange of itself */
-			print("=r%d;%d;%d;", tc, ty->u.sym->u.limits.min.i, ty->u.sym->u.limits.max.i),
-				col += 2+3+2*2.408*ty->size+2;
-		else			/* other signed ints are subranges of int */
-			print("=r1;%D;%D;", ty->u.sym->u.limits.min.i, ty->u.sym->u.limits.max.i),
-				col += 4+2*2.408*ty->size+2;
+	case INT:		
+		print("=r1;%D;%D;", ty->u.sym->u.limits.min.i, ty->u.sym->u.limits.max.i);		
 		break;
-	case UNSIGNED:
-		if (ty == chartype)	/* plain char is a subrange of itself */
-			print("=r%d;0;%u;", tc, ty->u.sym->u.limits.max.i),
-				col += 2+3+2+2.408*ty->size+1;
-		else			/* other signed ints are subranges of int */
-			print("=r1;0;%U;", ty->u.sym->u.limits.max.i),
-				col += 4+2.408*ty->size+1;
+	case UNSIGNED:		
+		print("=r1;0;%U;", ty->u.sym->u.limits.max.i);		
 		break;
 	case FLOAT:	/* float, double, long double get sizes, not ranges */
-		print("=r1;%d;0;", ty->size), col += 4+1+3;
+		print("=r1;%d;0;", ty->size);
 		break;
 	case POINTER:
-		print("=*"), col += 2;
-		col = emittype(ty->type, lev + 1, col);
+		print("=*");
+		emittype(ty->type);
 		break;
 	case FUNCTION:
-		print("=f"), col += 2;
-		col = emittype(ty->type, lev + 1, col);
+		print("=f");
+		emittype(ty->type);
 		break;
 	case ARRAY:	/* array includes subscript as an int range */
-		if (ty->size && ty->type->size) {
-                        print("=a"), col += 2;
-                        col = emittype(ty->type, lev + 1, col);
-		        print(";0;%d;", ty->size/ty->type->size - 1), col += 6;
-                        }
-		else
-			print("=ar1;0;-1;"), col += 10;
-		//col = emittype(ty->type, lev + 1, col);
+		print("=a");
+        emittype(ty->type);
+		print(";0;%d;", ty->size/ty->type->size - 1);        
 		break;
 	case STRUCT: case UNION: {
-                unsigned tmp;
-                Field p;
-		if (!ty->u.sym->defined) {
-			print("=x%c%s:", ty->op == STRUCT ? 's' : 'u', ty->u.sym->name);
-			col += 2+1+strlen(ty->u.sym->name)+1;
-			break;
-		}
-		if (lev > 0 && (*ty->u.sym->name < '0' || *ty->u.sym->name > '9')) {
-			ty->x.printed = 0;
-			break;
-		}
-		print("=%c%d", ty->op == STRUCT ? 's' : 'u', ty->size), col += 1+1+3;
-                print(";"), col += 1;
-                for (p = fieldlist(ty); p; p = p->link) {
+        unsigned tmp;
+        Field p;		
+		print("=%c%d", ty->op == STRUCT ? 's' : 'u', ty->size);
+        print(";");
+        for (p = fieldlist(ty); p; p = p->link) {
 			if (p->name)
-				print("%s:", p->name), col += strlen(p->name)+1;
+				print("%s:", p->name);
 			else
-				print(":"), col += 1;
-                        tmp = p->type->x.printed;
-                        p->type->x.printed = 1;
-                        col = emittype(p->type, lev + 1, col);
-                        p->type->x.printed = tmp;
-                        //print(";"), col += 1;
-                        if (p->lsb)
-				print(",%d;", 8*p->offset +
+				print(":");
+                tmp = p->type->x.printed;
+                p->type->x.printed = 1;
+                emittype(p->type);
+                p->type->x.printed = tmp;                        
+                if (p->lsb)
+					print(",%d;", 8*p->offset +
 					(IR->little_endian ? fieldright(p) : fieldleft(p)));
-			else
-				print(",%d;", 8*p->offset);
-			col += 1+3+1;	/* accounts for ,%d,%d; */
-			if (col >= 80 && p->link) {
-				print("\\\\\",%d,0,0,0\n\t.stabs \"", N_LSYM);
-				col = 8;
-			}
+				else
+					print(",%d;", 8*p->offset);				
 		}
-                break;
+        break;
 		}
 	case ENUM: {
-		Symbol *p;
-		if (lev > 0 && (*ty->u.sym->name < '0' || *ty->u.sym->name > '9')) {
-			ty->x.printed = 0;
-			break;
-		}
-		print("=e"), col += 2;
+		Symbol *p;		
+		print("=e");
 		for (p = ty->u.sym->u.idlist; *p; p++) {
-			print("%s:%d,", (*p)->name, (*p)->u.value), col += strlen((*p)->name)+3;
-			if (col >= 80 && p[1]) {
-				print("\\\\\",%d,0,0,0\n\t.stabs \"", N_LSYM);
-				col = 8;
-			}
+			print("%s:%d,", (*p)->name, (*p)->u.value);			
 		}
-		print(";"), col += 1;
+		print(";");
 		break;
 		}
 	default:
 		assert(0);
 	}
-	return col;
+	return;
 }
 
 /* stabblock - output a stab entry for '{' or '}' at level lev */
 void stabblock(int brace, int lev, Symbol *p) {
-	if (brace == '{')
-		while (*p)
-			stabsym(*p++);
-	if (IR == &sparcIR)
-		print(".stabd 0x%x,0,%d\n", brace == '{' ? N_LBRAC : N_RBRAC, lev);
-	else {
-		int lab = genlabel(1);
-		print("\t.stabn 0x%x,0,%d,%s%d_%s\n", brace == '{' ? N_LBRAC : N_RBRAC, lev,
-			stabprefix, lab, cfunc->x.name);
-		print("%s%d:\n", stabprefix, lab);
-	}
 }
 
 /* stabinit - initialize stab output */
 void stabinit(char *file, int argc, char *argv[]) {
 	typedef void (*Closure)(Symbol, void *);
 	extern char *getcwd(char *, size_t);
-
-	print("\t.stabs \"lcc4_compiled.\",0x%x,0,0,0\n", N_OPT);
+	
 	if (file && *file) {
+		print("\t.stabs \"lcc4_compiled.\",0x%x,0,0,0\n", N_OPT);
 		char buf[1024], *cwd = getcwd(buf, sizeof buf);
 		if (cwd)
 			print("\t.stabs \"%s/\",0x%x,0,3,%stext0\n", cwd, N_SO, stabprefix);
@@ -234,22 +150,14 @@ void stabinit(char *file, int argc, char *argv[]) {
 		print("%stext0:\n", stabprefix, N_SO);
 		currentfile = file;
 	}
-	dbxtype(inttype);
-	dbxtype(chartype);
-	dbxtype(doubletype);
-	dbxtype(floattype);
-	dbxtype(longdouble);
-	dbxtype(longtype);
-	dbxtype(longlong);
-	dbxtype(shorttype);
-	dbxtype(signedchar);
-	dbxtype(unsignedchar);
-	dbxtype(unsignedlong);
-	dbxtype(unsignedlonglong);
-	dbxtype(unsignedshort);
 	dbxtype(unsignedtype);
-	dbxtype(voidtype);
-	foreach(types, GLOBAL, (Closure)stabtype, NULL);
+	dbxtype(voidtype);	
+	dbxtype(inttype);	
+	dbxtype(unsignedshort);
+	dbxtype(shorttype);
+	dbxtype(unsignedchar);
+	dbxtype(signedchar);	
+	
 }
 
 /* stabline - emit stab entry for source coordinate *cp */
@@ -277,9 +185,9 @@ void stabsym(Symbol p) {
 	if (p->generated || p->computed)
 		return;
 	if (isfunc(p->type)) {
-		print("\t.stabs \"%s:%c%d\",%d,%d,0,%s\n", p->name,
+		print("\t.stabs \"%s:%c%d\",%d,0,0,%s\n", p->name,
 			p->sclass == STATIC ? 'f' : 'F', dbxtype(freturn(p->type)),
-			N_FUN, framesize, p->x.name);
+			N_FUN, p->x.name);
 		return;
 	}
 	if (!IR->wants_argb && p->scope == PARAM && p->structarg) {
@@ -328,11 +236,7 @@ void stabtype(Symbol p) {
 }
 
 /* stabend - finalize a function */
-void stabfend(Symbol p, int lineno) {
-print("\t.stabs \"%s:%c%d\",%d,%d,0,%s\n", p->name,
-			p->sclass == STATIC ? 'f' : 'F', dbxtype(freturn(p->type)),
-			N_FUN, framesize, p->x.name);
-}
+void stabfend(Symbol p, int lineno) {}
 
 /* stabend - finalize stab output */
 void stabend(Coordinate *cp, Symbol p, Coordinate **cpp, Symbol *sp, Symbol *stab) {

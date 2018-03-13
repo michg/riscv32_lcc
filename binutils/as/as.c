@@ -20,7 +20,7 @@
 #define NUM_REGS	32
 #define AUX_REG		1
 
-#define LINE_SIZE	200
+#define LINE_SIZE	400
 
 #define TOK_EOL		0
 #define TOK_LABEL	1
@@ -171,17 +171,21 @@ typedef struct fixup {
   struct fixup *next;		/* next fixup */
 } Fixup;
 
+#define numbersubtypes 64
+#define maxnamelen 32
+#define symbolmaxnamelen 256
+
 typedef struct typeinfo {
-  char name[64][16];
+  char name[numbersubtypes][maxnamelen];
   int ispointer;
   int isarray;
   int arraysize;
   int isstruct;
-  int reftype[16];
-  int offset[16];
+  int reftype[numbersubtypes];
+  int offset[numbersubtypes];
 } Typeinfo;
 
-Typeinfo typetable[32];
+Typeinfo typetable[128];
 
 typedef struct symbol {
   char *name;			/* name of symbol */
@@ -626,7 +630,7 @@ Symbol *newSymbol(char *name,int debug) {
 
   p = allocateMemory(sizeof(Symbol));
   if(debug)
-  p->name = allocateMemory(strlen(name) + 81);
+  p->name = allocateMemory(strlen(name) + symbolmaxnamelen);
   else
   p->name = allocateMemory(strlen(name) + 1);
   strcpy(p->name, name);
@@ -1135,7 +1139,7 @@ void dotStabs(unsigned int code) {
       ptr2=strchr(ptr, ':');
       k = 1;
       while(ptr2 != 0) {
-          strncpy(typetable[i].name[k], ptr+1, ptr2-ptr-1);
+          strncpy(&typetable[i].name[k][0], ptr+1, ptr2-ptr-1);
           typetable[i].name[k][ptr2-ptr-1] = '\0';
           str2int(ptr2+1, &j);
           typetable[i].reftype[k] = j;
@@ -1146,6 +1150,7 @@ void dotStabs(unsigned int code) {
           ptr2=strchr(ptr, ':');
           k++;
       }
+	  typetable[i].reftype[k] = 0;
     }
     else
       typetable[i].isstruct = 0;
@@ -1190,16 +1195,12 @@ void dotStabs(unsigned int code) {
             label->debugvalue = 0;
             break;
   case 'f':
-  case 'F': n=sprintf(debuglabel,"%s:",name);
+  case 'F': n=sprintf(debuglabel,"%s ",name);
             strcpy(funcname,name);
             label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
-            if(label->status==STATUS_DEFINED) {
-              label->debugvalue = u.con;
-            } else {
-              label->status = STATUS_DEFINED;
-              label->segment = currSeg;
-              label->value = segPtr[currSeg];
-            }
+            label->status = STATUS_DEFINED;
+            label->segment = currSeg;
+            label->value = segPtr[currSeg];            
             label->debug = DBG_FUNC;
             ptr+=2;
             break;
@@ -2333,16 +2334,13 @@ void writeSymbol(Symbol *s) {
     symRec.debug = s->debug;
   }
   fwrite(&symRec, sizeof(SymbolRecord), 1, outFile);
-  symtblSize += sizeof(SymbolRecord);
-  if(s->debug==DBG_FUNC) {
-    sprintf(s->name+strlen(s->name), "%d ", s->debugvalue);
-  }
+  symtblSize += sizeof(SymbolRecord);  
   if(s->debugtype) {
     strcat(s->name,"<");
 
     if(typetable[s->debugtype].isstruct) {
        for(i=1;typetable[s->debugtype].reftype[i]!=0;i++) {
-            sprintf(s->name+strlen(s->name), "%s", typetable[s->debugtype].name[i]);
+            sprintf(s->name+strlen(s->name), "%s", &typetable[s->debugtype].name[i][0]);
             strcat(s->name,":");
             strcat(s->name, typetable[typetable[s->debugtype].reftype[i]].name[0]);
             strcat(s->name,":");
