@@ -133,6 +133,17 @@ static void emittype(Type ty) {
 
 /* stabblock - output a stab entry for '{' or '}' at level lev */
 void stabblock(int brace, int lev, Symbol *p) {
+	if (brace == '{')
+		while (*p)
+			stabsym(*p++);
+	if (IR == &sparcIR)
+		print(".stabd 0x%x,0,%d\n", brace == '{' ? N_LBRAC : N_RBRAC, lev);
+	else {
+		int lab = genlabel(1);
+		print("\t.stabn 0x%x,0,%d,%s%d_%s\n", brace == '{' ? N_LBRAC : N_RBRAC, lev,
+			stabprefix, lab, cfunc->x.name);
+		print("%s%d:\n", stabprefix, lab);
+	}
 }
 
 /* stabinit - initialize stab output */
