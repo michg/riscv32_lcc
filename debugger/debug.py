@@ -4,6 +4,7 @@ from socket import *
 import binascii
 import select
 import struct
+from collections import namedtuple 
 try:
     from colorama import init
 except:
@@ -19,11 +20,21 @@ PTRSIZE = 4
 PTRTYPE = 'unsigned int'
 
 INDADR = 0
-INDTYPE = 1
-INDTYPEPTR = 0
-INDTYPEDIM = 1
-INDTYPETYPE = 2
-INDTYPESUBV = 3
+INDTYPENUM = 1
+
+INDTYPENAME = 0
+INDTYPEDESC = 1
+INDTYPESUBTY = 2 
+
+fmts = {
+    'unsigned int': ('<I',4),
+    'void': ('<I',4),
+    'int': ('<i',4),
+    'unsigned short': ('<H',2),
+    'short':('<h',2),
+    'unsigned char':('<B',1),
+    'signed char':('<b',1)
+    }
 
 
 
@@ -66,38 +77,25 @@ def print_file_line(filename, lineno):
         else:
             print("\033[33m\033[1m", str(i).rjust(4), "\033[0m\033[39m  ", lines[i-1])
 
-def parse_typedesc(line): 
-    typedesc = line[line.find('<')+1:line.find('>')]
-
-    ptrcount = typedesc.count('*')
-    if ptrcount:
-        typedesc = typedesc[:-ptrcount]
-
-    dim = None
-    if '[' in typedesc:
-        dimensions = typedesc[typedesc.find('[')+1:typedesc.rfind(']')].replace('][', ' ')
-        dim = tuple([int(d) for d in dimensions.split()])
-        typedesc = typedesc[:typedesc.find('[')]
-    if typedesc in typedef:
-        typedesc = typedef[typedesc]
-    typedesc=typedesc.split(',')
-    subvars = {}
-    if len(typedesc) > 1:
-        for type in typedesc:
-            name, type, bitoffset = type.split(':')
-            byteoffset = str2int(bitoffset) // 8
-            subvars[name] = (type, byteoffset)
-    return ptrcount, dim, typedesc, subvars
-
 # --- debug information
 def read_debug_symbols(module):
     global maxfileline
     maxfileline = 0
     for line in open(module+'.dbg'):
         if line.startswith('typedef:'):
-            types = line[line.find('<')+1:line.find('>')]
-            name = line.split()[1].strip()
-            typedef[name] = types
+            split = line.split('#')
+            typename, typenum = split[1].split(':')            
+            typenum = int(typenum)            
+            typedesc = split[2]
+            subtypes = {}
+            subtypedesc = typedesc.split(';')          
+            if subtypedesc[0][1] == 's':
+                subtypedesc = subtypedesc[1:-1]
+                for type in subtypedesc:
+                    name, type, bitoffset = type.split(',')
+                    byteoffset = str2int(bitoffset) // 8
+                    subtypes[name] = (type, byteoffset)
+            typedef[typenum] = (typename, typedesc, subtypes)
          
     for line in open(module+'.dbg'):
          split = line.split()
@@ -118,28 +116,33 @@ def read_debug_symbols(module):
              data = bytes.fromhex(split[-1][2:])
              res, = struct.unpack('>i', data)
              proc, var = split[1].split(':')
-             local_var.setdefault(proc, {})[var] = (res, parse_typedesc(line), 'reglocal') 
+             typenum = int(split[2])
+             local_var.setdefault(proc, {})[var] = (res, typenum, 'reglocal') 
        
          elif split[0] == 'stacklocal:':
              data = bytes.fromhex(split[-1][2:])
              res, = struct.unpack('>i', data)
              proc, var = split[1].split(':')
-             local_var.setdefault(proc, {})[var] = (res, parse_typedesc(line), 'stacklocal')
+             typenum = int(split[2])
+             local_var.setdefault(proc, {})[var] = (res, typenum, 'stacklocal')
 
          elif split[0] == 'function:':
-             name = split[1]
+             name = split[1]             
              proc_address[name] = address             
 
          elif split[0] == 'regparam:': 
              proc, var = split[1].split(':')
-             local_var.setdefault(proc, {})[var] = (address, parse_typedesc(line), 'regparam') 
+             typenum = int(split[2])
+             local_var.setdefault(proc, {})[var] = (address, typenum, 'regparam') 
         
          elif split[0] == 'stackparam:':
              proc, var = split[1].split(':')
-             local_var.setdefault(proc, {})[var] = (address, parse_typedesc(line), 'stackparam') 
+             typenum = int(split[2])
+             local_var.setdefault(proc, {})[var] = (address, typenum, 'stackparam') 
 
          elif split[0] == 'global:':
-             global_var[split[1]] = (address, parse_typedesc(line))
+             typenum = int(split[2])
+             global_var[split[1]] = (address, typenum)
 
 
 
@@ -153,6 +156,80 @@ def load_debug_information(module):
     address_proc = dict([(v,k) for k,v in proc_address.items()])
     
     address_global_var = dict([(b[0],a) for a,b in global_var.items()])
+
+
+def var2adr(var):
+    return(var[INDADR])
+
+def var2tynum(var):
+    return(var[INDTYPENUM])
+ 
+def tynum2tyname(typenum):
+    return(typedef[typenum][INDTYPENAME])
+
+def var2tyname(var, ref):
+    if(ref==0):
+        return PTRTYPE;
+    typenr = var2tynum(var)
+    typedesc = tynum2tydesc(typenr)
+    if(tyispointer(typenr)):
+        typerefnr = str2int(typedesc[2:])
+        return(typename(typerefnr));
+    if(tyisarray(typenr)):
+        typerefnr = str2int(typedesc[2:typedesc.find(';')])
+        return(typename(typerefnr))
+    return(typedef[typenr][INDTYPENAME])
+
+def tynum2tydesc(typenum):
+    return(typedef[typenum][INDTYPEDESC]) 
+
+def var2tydesc(var):
+    return(typedef[var2tynum(var)][INDTYPEDESC]) 
+
+def tynum2tysubty(typenum):
+    return(typedef[typenum][INDTYPESUBTY])    
+    
+def var2tysubty(var):
+    return(typedef[var2tynum(var)][INDTYPESUBTY])    
+
+def tyispointer(typenr):
+    typedesc = tynum2tydesc(typenr)
+    if(typedesc[1] == '*'):
+        return 1
+    else:
+        return 0
+        
+def varispointer(var):
+    return(tyispointer(var2tynum(var)))
+
+def tyisarray(typenr):
+    typedesc = tynum2tydesc(typenr)
+    if(typedesc[1] == 'a'):
+        return 1
+    else:
+        return 0
+
+def varisarray(var):
+    return(tyisarray(var2tynum(var)))
+
+def tyname2size(name):
+    return(fmts[name][1])
+
+def tyname2fmt(name):
+    return(fmts[name][0])
+
+def typename(typenr):
+    typedesc = tynum2tydesc(typenr)
+    if(tyispointer(typenr)):
+        typerefnr = str2int(typedesc[2:])
+        return(typename(typerefnr) + '*');
+    if(tyisarray(typenr)):
+        typerefnr = str2int(typedesc[2:typedesc.find(';')])
+        return(typename(typerefnr) + '[]')
+    return(typedef[typenr][INDTYPENAME])
+
+def varloctype(var):
+    return(var[2]) 
 
 class rsp:
     def __init__(self, port):
@@ -277,8 +354,15 @@ class rsp:
             self.pc, = struct.unpack('<I', data)
             self.curline = self._get_line(self.pc)
             print_file_line(srcname, self.curline)
-            
 
+    def read_type(self, adr, tyname):
+        """ Read from type from addres"""
+        Rsp.sendpkt("m %x,%x" %(adr, tyname2size(tyname)),3)
+        data = Rsp.readpkt() 
+        data = bytes.fromhex(data)
+        res, = struct.unpack(tyname2fmt(tyname), data)
+        return(res)
+        
     def close(self):
         self.s.close()
 
@@ -433,15 +517,6 @@ class DebugCli(cmd.Cmd):
 
     def do_print(self, line):
         """ print variable """
-        fmts = {
-         'unsigned int': ('<I',4),
-         'void': ('<I',4),
-         'int': ('<i',4),
-         'unsigned short': ('<H',2),
-         'short':('<h',2),
-         'unsigned char':('<B',1),
-         'signed char':('<b',1)
-        }
         if(Rsp.state != STOPPED):
             print("Command only possible during STOPPED-state.")
             return
@@ -462,77 +537,36 @@ class DebugCli(cmd.Cmd):
         else:
            subvar = ''
         if var in global_var:
-            ptr = global_var[var][INDTYPE][INDTYPEPTR]
-            adr = global_var[var][INDADR]
-            
-            if ptr>0:
-                print("PTR")
-                Rsp.sendpkt("m %x,%x"%(adr,PTRSIZE),3)
-                data = Rsp.readpkt() 
-                data = bytes.fromhex(data)
-                vartype = PTRTYPE
-                adr, = struct.unpack(fmts[PTRTYPE][0], data) 
-                val = adr
-            if (deref or ptr==0):
-                adrofs = 0
-                if subvar != '':
-                    subvars = global_var[var][INDTYPE][INDTYPESUBV]
-                    adrofs += subvars[subvar][1]
-                    print("adrofs: %i"%adrofs)
-                    vartype = subvars[subvar][0]
-                    print("VT:%s"%vartype)
-                else:
-                    vartype = global_var[var][INDTYPE][INDTYPETYPE][0]
-                    
-                size = fmts[vartype][1]
-                if(index != 0):
-                    adr += index*size
-                adr += adrofs
-                Rsp.sendpkt("m %x,%x"%(adr,size),3)
-                data = Rsp.readpkt() 
-                data = bytes.fromhex(data)
-                val, = struct.unpack(fmts[vartype][0], data)
-            print("%s[%s]=%08X"%(var,vartype,val))
+            adr = var2adr(global_var[var])
+            vartypename = var2tyname(global_var[var], deref)
+            if deref:
+                adr = Rsp.read_type(adr, PTRTYPE) 
+            if(index != 0):
+                size = tyname2size(vartypename)
+                adr += index*size
+            val = Rsp.read_type(adr, vartypename)
+            print("%s:%s@%08X=%08X"%(var,vartypename,adr,val))
         else:
             curfunc = Rsp._get_proc(Rsp.pc) 
             if var in local_var[curfunc]:
-                vartype = local_var[curfunc][var][INDTYPE][INDTYPETYPE][0]
-                if(local_var[curfunc][var][2].find('stack') != -1):
-                    ofs = local_var[curfunc][var][INDADR]
-                    curbase = Rsp._get_register(8);                    
-                    ptr = local_var[curfunc][var][INDTYPE][INDTYPEPTR]
-                    if(ptr>0):
-                        size = PTRSIZE
-                        vartype = PTRTYPE
-                    else:
-                        size = fmts[vartype][1]
-                    adr = curbase + ofs;
+                if(varloctype(local_var[curfunc][var]).find('stack') != -1):
+                    ofs = var2adr(local_var[curfunc][var])
+                    curbase = Rsp._get_register(8); 
+                    adr = curbase + ofs         
+                    vartypename = var2tyname(local_var[curfunc][var], deref)
+                    if deref:
+                        adr = Rsp.read_type(adr, PTRTYPE);
                     if(index != 0):
-                        adr+=index*size
-                    Rsp.sendpkt("m %x,%x"%(adr,size),3)
-                    data = Rsp.readpkt() 
-                    data = bytes.fromhex(data)
-                    if(ptr==0 or deref):
-                        val, = struct.unpack(fmts[vartype][0], data)
-                    else:
-                        adr, = struct.unpack(fmts[PTRTYPE][0], data)
-                        size = fmts[vartype][1]
-                        Rsp.sendpkt("m %x,%x"%(adr,size),3)
-                        data = Rsp.readpkt() 
-                        data = bytes.fromhex(data)
-                        val, = struct.unpack(fmts[vartype][0], data)
-                    print("%s[%s]=%08X"%(line,vartype,val))
-                elif(local_var[curfunc][var][2].find('reg') != -1):
-                    regnum = local_var[curfunc][var][INDADR]
-                    ptr = local_var[curfunc][var][INDTYPE][INDTYPEPTR]
+                        size = tyname2size(vartypename)
+                        adr += index*size
+                    val = Rsp.read_type(adr, vartypename)
+                    print("%s:%s@%08X=%08X"%(line,vartypename,adr,val))
+                elif(varloctype(local_var[curfunc][var]).find('reg') != -1):
+                    regnum = var2adr(local_var[curfunc][var])
                     val = Rsp._get_register(regnum);
-                    if(ptr>0 and deref):
-                        adr = val
-                        size = fmts[vartype][1]
-                        Rsp.sendpkt("m %x,%x"%(adr,size),3)
-                        data = Rsp.readpkt() 
-                        data = bytes.fromhex(data)
-                        val, = struct.unpack(fmts[vartype][0], data)
+                    vartypename = var2tyname(local_var[curfunc][var], deref)
+                    if deref:
+                        val = Rsp.read_type(val, vartypename)
                     print("%s = %08X"%(line,val))
             else:
                 print("%s not in context of %s"%(line, curfunc))
@@ -547,8 +581,8 @@ class DebugCli(cmd.Cmd):
         curfunc = Rsp._get_proc(Rsp.pc) 
         print("Funktion:%s"%curfunc)
         for var in local_var[curfunc]:
-            type = local_var[curfunc][var][INDTYPE][INDTYPETYPE]
-            print("%s:%s,%s"%(var, type,local_var[curfunc][var][2]))
+            typenr = var2tynum(local_var[curfunc][var])
+            print("%s:%s"%(var, typename(typenr)))
     
     do_sloc = do_showlocals
     
@@ -558,8 +592,8 @@ class DebugCli(cmd.Cmd):
             print("Command only possible during STOPPED-state.")
             return
         for var in global_var:
-            type = global_var[var][INDTYPE][INDTYPETYPE]
-            print("%s:%s"%(var, type))
+            typenr = var2tynum(global_var[var])
+            print("%s:%s"%(var, typename(typenr)))
     
     do_sglo = do_showglobals
     

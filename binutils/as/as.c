@@ -171,21 +171,8 @@ typedef struct fixup {
   struct fixup *next;		/* next fixup */
 } Fixup;
 
-#define numbersubtypes 64
-#define maxnamelen 32
 #define symbolmaxnamelen 256
 
-typedef struct typeinfo {
-  char name[numbersubtypes][maxnamelen];
-  int ispointer;
-  int isarray;
-  int arraysize;
-  int isstruct;
-  int reftype[numbersubtypes];
-  int offset[numbersubtypes];
-} Typeinfo;
-
-Typeinfo typetable[128];
 
 typedef struct symbol {
   char *name;			/* name of symbol */
@@ -1095,76 +1082,30 @@ void dotBss(unsigned int code) {
 
 void dotStabs(unsigned int code) {
   Value u,v;
-  int n,k;
-  unsigned int i,j;
-  char *ptr, *ptr2;
+  unsigned int i, typenum, semicol, n;
+  char *ptr, *def, *name;
   char ch;
-  char name[64];
-  Symbol *label,*local;
+  Symbol *label, *local;
   expect(TOK_STRING);
   strcpy(tmpstring,tokenvalString);
   getToken();
   expect(TOK_COMMA);
   getToken();
   v = parseExpression();
-  n = strcspn(tmpstring, ":");
-  strncpy(name, tmpstring,n);
-  name[n] = '\0';
-  ptr=strchr(tmpstring, '=');
-  if(ptr) {
-    str2int(tmpstring+n+2, &i);
-    strcpy(typetable[i].name[0], name);
-    ptr=strchr(tmpstring, '=');
-    if (*(ptr+1)=='*') {
-      typetable[i].ispointer = 1;
-      str2int(ptr+2, &j);
-      typetable[i].reftype[0]=j;
-      strcpy(typetable[i].name[0], typetable[j].name[0]);
-      } else
-    typetable[i].ispointer = 0;
-    if (*(ptr+1)=='a') {
-      typetable[i].isarray = 1;
-      str2int(ptr+2, &j);
-      typetable[i].reftype[0]=j;
-      strcpy(typetable[i].name[0], typetable[j].name[0]);
-      ptr=strchr(tmpstring+n, ';');
-      ptr=strchr(ptr+1, ';');
-      str2int(ptr+1, &j);
-      typetable[i].arraysize=j+1;
-    } else
-    typetable[i].isarray = 0;
-    if (*(ptr+1)=='s') {
-      typetable[i].isstruct = 1;
-      ptr=strchr(ptr+1, ';');
-      ptr2=strchr(ptr, ':');
-      k = 1;
-      while(ptr2 != 0) {
-          strncpy(&typetable[i].name[k][0], ptr+1, ptr2-ptr-1);
-          typetable[i].name[k][ptr2-ptr-1] = '\0';
-          str2int(ptr2+1, &j);
-          typetable[i].reftype[k] = j;
-          ptr2=strchr(ptr, ',');
-          str2int(ptr2+1, &j);
-          typetable[i].offset[k] = j;
-          ptr=strchr(ptr+1, ';');
-          ptr2=strchr(ptr, ':');
-          k++;
-      }
-	  typetable[i].reftype[k] = 0;
-    }
-    else
-      typetable[i].isstruct = 0;
-    if(*(ptr+1)=='d') {
-      str2int(ptr+2, &j);
-      n = sprintf(debuglabel,"typedef: %s ",(typetable[j].isstruct)?typetable[j].name[0]:name);
-      label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
-      label->status = STATUS_DEFINED;
-      label->segment = currSeg;
-      label->value = segPtr[currSeg];
-      label->debug = DBG_TYPEDEF;
-      label->debugtype = j;
-      label->debugvalue = 0;
-    }
+  semicol = strcspn(tmpstring, ":");
+  name = strndup(tmpstring, semicol);  
+  def = strchr(tmpstring, '=');
+  if(def) {
+    str2int(tmpstring + semicol + 2, &typenum);    
+    n = sprintf(debuglabel,"typedef: #%s:%d#%s", name, typenum, def);
+    label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
+    label->status = STATUS_DEFINED;
+    label->segment = currSeg;
+    label->value = segPtr[currSeg];
+    label->debug = DBG_TYPEDEF;
+    label->debugtype = 0;
+    label->debugvalue = 0;
+    
   } else {
   }
   expect(TOK_COMMA);
@@ -1180,7 +1121,7 @@ void dotStabs(unsigned int code) {
   } else {
     v = parseExpression();
   }
-  if(!ptr) {
+  if(!def) {
    ptr=strchr(tmpstring, ':');
    ch=*(ptr+1);
   switch(ch) {
@@ -1234,7 +1175,10 @@ void dotStabs(unsigned int code) {
                 break;
   }
   str2int(ptr, &i);
-  label->debugtype = i;
+  sprintf(label->name+strlen(label->name),"%d",i); 
+  if(label->debug==DBG_VARLOCSTACK || label->debug==DBG_VARLOCREG) {
+    sprintf(label->name+strlen(label->name), " @ 0x%08X\n", label->debugvalue);
+  }
  }
 }
 
@@ -2335,27 +2279,6 @@ void writeSymbol(Symbol *s) {
   }
   fwrite(&symRec, sizeof(SymbolRecord), 1, outFile);
   symtblSize += sizeof(SymbolRecord);  
-  if(s->debugtype) {
-    strcat(s->name,"<");
-
-    if(typetable[s->debugtype].isstruct) {
-       for(i=1;typetable[s->debugtype].reftype[i]!=0;i++) {
-            sprintf(s->name+strlen(s->name), "%s", &typetable[s->debugtype].name[i][0]);
-            strcat(s->name,":");
-            strcat(s->name, typetable[typetable[s->debugtype].reftype[i]].name[0]);
-            strcat(s->name,":");
-            sprintf(s->name+strlen(s->name),"%d",typetable[s->debugtype].offset[i]);
-            if(typetable[s->debugtype].reftype[i+1]!=0 )strcat(s->name,",");
-       }
-    } else strcat(s->name, typetable[s->debugtype].name[0]);
-
-    if(typetable[s->debugtype].ispointer) {strcat(s->name,"*"); }
-    if(typetable[s->debugtype].isarray) {sprintf(s->name+strlen(s->name),"[%d]",typetable[s->debugtype].arraysize); }
-    strcat(s->name,"> ");
-  }
-  if(s->debug==DBG_VARLOCSTACK || s->debug==DBG_VARLOCREG) {
-    sprintf(s->name+strlen(s->name), "@ 0x%08X\n", s->debugvalue);
-  }
   stringSize += strlen(s->name) + 1;
 }
 

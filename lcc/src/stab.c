@@ -7,6 +7,8 @@ static char rcsid[] = "$Id$";
 
 static char *currentfile;       /* current file name */
 static int ntypes;
+static Type missing[16];
+static int indmissing;
 
 extern Interface sparcIR;
 
@@ -41,7 +43,9 @@ static void dbxout(Type ty) {
 
 /* dbxtype - emit a stabs entry for type ty, return type code */
 static int dbxtype(Type ty) {	
+    indmissing = 0;
 	dbxout(ty);
+    while(indmissing) dbxout(missing[indmissing--]);
 	return ty->x.typeno;
 }
 
@@ -54,7 +58,7 @@ static int dbxtype(Type ty) {
  */
 static void emittype(Type ty) {
 	int tc = ty->x.typeno;
-
+    unsigned tmp;         
 	if (isconst(ty) || isvolatile(ty)) {
 		emittype(ty->type);
 		ty->x.typeno = ty->type->x.typeno;
@@ -70,7 +74,7 @@ static void emittype(Type ty) {
 	ty->x.printed = 1;
 	switch (ty->op) {
 	case VOID:	/* void is defined as itself */
-		print("=%d", tc);
+		print("=r1");
 		break;
 	case INT:		
 		print("=r1;%D;%D;", ty->u.sym->u.limits.min.i, ty->u.sym->u.limits.max.i);		
@@ -82,8 +86,14 @@ static void emittype(Type ty) {
 		print("=r1;%d;0;", ty->size);
 		break;
 	case POINTER:
-		print("=*");
+        print("=*");
+        tmp = ty->type->x.printed;
+        if(!tmp) {                    
+            ty->type->x.printed = 1;
+            missing[++indmissing] = ty->type;
+        }		
 		emittype(ty->type);
+        ty->type->x.printed = tmp;
 		break;
 	case FUNCTION:
 		print("=f");
@@ -91,42 +101,50 @@ static void emittype(Type ty) {
 		break;
 	case ARRAY:	/* array includes subscript as an int range */
 		print("=a");
+        tmp = ty->type->x.printed;
+        if(!tmp) {                    
+            ty->type->x.printed = 1;
+            missing[++indmissing] = ty->type;
+        }				
         emittype(ty->type);
+        ty->type->x.printed = tmp;
 		print(";0;%d;", ty->size/ty->type->size - 1);        
 		break;
-	case STRUCT: case UNION: {
-        unsigned tmp;
-        Field p;		
+	case STRUCT: case UNION: {        
+        Field p;        
 		print("=%c%d", ty->op == STRUCT ? 's' : 'u', ty->size);
         print(";");
         for (p = fieldlist(ty); p; p = p->link) {
 			if (p->name)
-				print("%s:", p->name);
+				print("%s,", p->name);
 			else
-				print(":");
-                tmp = p->type->x.printed;
+				print(",");
+            tmp = p->type->x.printed;
+            if(!tmp) {                    
                 p->type->x.printed = 1;
-                emittype(p->type);
-                p->type->x.printed = tmp;                        
-                if (p->lsb)
-					print(",%d;", 8*p->offset +
-					(IR->little_endian ? fieldright(p) : fieldleft(p)));
-				else
-					print(",%d;", 8*p->offset);				
-		}
-        break;
-		}
+                missing[++indmissing] = p->type;
+            }
+            emittype(p->type);
+            p->type->x.printed = tmp;                
+            if (p->lsb)
+				print(",%d;", 8*p->offset +
+				(IR->little_endian ? fieldright(p) : fieldleft(p)));
+			else
+				print(",%d;", 8*p->offset);				
+		}                
+        break;		
+        }
 	case ENUM: {
 		Symbol *p;		
-		print("=e");
+		print("=e;");
 		for (p = ty->u.sym->u.idlist; *p; p++) {
 			print("%s:%d,", (*p)->name, (*p)->u.value);			
 		}
 		print(";");
 		break;
 		}
-	default:
-		assert(0);
+	//default:
+		//assert(0);
 	}
 	return;
 }
@@ -161,13 +179,21 @@ void stabinit(char *file, int argc, char *argv[]) {
 		print("%stext0:\n", stabprefix, N_SO);
 		currentfile = file;
 	}
-	dbxtype(unsignedtype);
-	dbxtype(voidtype);	
-	dbxtype(inttype);	
-	dbxtype(unsignedshort);
+	dbxtype(inttype);
+	dbxtype(chartype);
+	dbxtype(doubletype);
+	dbxtype(floattype);
+	dbxtype(longdouble);
+	dbxtype(longtype);
+	dbxtype(longlong);
 	dbxtype(shorttype);
+	dbxtype(signedchar);
 	dbxtype(unsignedchar);
-	dbxtype(signedchar);	
+	dbxtype(unsignedlong);
+	dbxtype(unsignedlonglong);
+	dbxtype(unsignedshort);
+	dbxtype(unsignedtype);
+	dbxtype(voidtype); 
 	
 }
 
@@ -237,13 +263,13 @@ void stabsym(Symbol p) {
 }
 
 /* stabtype - output a stab entry for type *p */
-void stabtype(Symbol p) {
-	if (p->type) {
+void stabtype(Symbol p) {	
+    if (p->type) {
 		if (p->sclass == 0)
 			dbxtype(p->type);
 		else if (p->sclass == TYPEDEF)
-			print("\t.stabs \"%s:=d%d\",%d,0,0,0\n", p->name, dbxtype(p->type), N_LSYM);
-	}
+			print("\t.stabs \"%s:=d%d\",%d,0,0,0\n", p->name, dbxtype(p->type), N_LSYM);            
+	}    
 }
 
 /* stabend - finalize a function */
