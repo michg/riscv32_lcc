@@ -208,6 +208,12 @@ int insrange(int bits, int val) {
   return((val<=(msb-1) && val>=ll) ? 1 : 0);
 }
 
+int inurange(int bits, int val) {
+  int msb = 1<<bits;
+  int ll = 0;
+  return((val<=(msb-1) && val>=ll) ? 1 : 0);
+}
+
 int rvcreg(int reg) {
  return((reg>=8 && reg<=15)? 1 : 0);
 }
@@ -1582,9 +1588,9 @@ void formatS(unsigned int code) {
     immed = 0;
   }
   rvccond = (rvc!=0) && (v.sym==NULL) && (code==OP_SW);
-  if (rvccond && (rvcreg(src2)==1) && (rvcreg(src1)==1) && (insrange(7, vcon)==1) )
+  if (rvccond && (rvcreg(src2)==1) && (rvcreg(src1)==1) && (inurange(7, vcon)==1) )
     emitHalf(6<<13 | ((immed>>3)&0x7)<<10 | (src1-8)<<7 | ((immed>>2)&0x1)<<6 | ((immed>>6)&0x1)<<5 | (src2-8)<<2 | 0x0);
-  else if(rvccond && src1==2 && (insrange(8, vcon)==1))
+  else if(rvccond && src1==2 && (inurange(8, vcon)==1))
     emitHalf(6<<13 | ((immed>>2)&0xF)<<9 | ((immed>>6)&0x3)<<7 | src2<<2 | 0x2);
   else
    emitWord(((immed>>5)&0x7F)<<25 | src2<<20 | src1<<15 |(code&0x7)<<12| (immed&0x1F)<<7 | 0x23);
@@ -1762,9 +1768,9 @@ void formatLIm(unsigned int code) {
     src1 = dst;
   }
   rvccond = (rvc!=0) && (v.sym==NULL) && (code==OP_LW);
-   if( rvccond && (rvcreg(dst)==1) && (rvcreg(src1)==1) && (insrange(7, vcon)==1))
+   if( rvccond && (rvcreg(dst)==1) && (rvcreg(src1)==1) && (inurange(7, vcon)==1))
     emitHalf(2<<13 | ((immed>>3)&0x7)<<10 | (src1-8)<<7 | ((immed>>2)&0x1)<<6 | ((immed>>6)&0x1)<<5 | (dst-8)<<2 | 0x0);
-   else if( rvccond && (src1==2) && (insrange(8, vcon)==1))
+   else if( rvccond && (src1==2) && (inurange(8, vcon)==1))
     emitHalf(2<<13 | ((immed>>5)&0x1)<<12 | dst<<7 | ((immed>>2)&0x7)<<4 | ((immed>>6)&0x3)<<2 | 0x2);
    else
     emitWord( immed<<20 | src1 << 15 | ((code>>4)&0x7)<<12 | dst<<7 | (code&0xF)<<3 | 0x3);
