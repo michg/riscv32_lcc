@@ -881,7 +881,7 @@ void readSymbols(void) {
       /* the symbol is defined in this symbol record */
       if ((sym->type & MSB) == 0) {
         /* the symbol was already defined in the table */
-        error("symbol '%s' multiply defined", sym->name);
+        printf("symbol '%s' multiply defined!\n\r", sym->name);
       } else {
         /* the symbol was not yet defined in the table, so define it now */
         /* the segment is copied directly from the file */
@@ -975,11 +975,16 @@ void printliststring(Lelem* x) {
 }
 
 void printdebSymbol(Symbol *s) {
+  Symbol *refsym;
+  char *refname, *tmp;  
   switch (s->debug) {
     /* debug symbol */
     case DBG_LINE: fprintf(debFile, "line: %s @ 0x%08X\n", s->name, s->value+segStart[s->type]);
                    break;
-    case DBG_FUNC: fprintf(debFile, "function: %s @ 0x%08X\n", s->name, s->value+segStart[s->type]);
+    case DBG_FUNC: tmp = strdup(s->name);
+                   refname = strtok(tmp, " ");
+                   refsym = lookupEnter(&symbolTable, refname, NULL, 0);    
+                   fprintf(debFile, "function: %s @ 0x%08X\n", refsym->name, refsym->value+segStart[refsym->type]);
                    break;
     case DBG_VARGLO: fprintf(debFile, "global: %s @ 0x%08X\n", s->name, s->value+segStart[s->type]);
                      break;
