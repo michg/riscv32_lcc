@@ -1,6 +1,7 @@
 import sys, os, string
 import binascii
 import struct
+from sys import argv 
 from Verilog_VCD import parse_vcd
 from types import SimpleNamespace as New
 
@@ -129,7 +130,7 @@ def getsigvalstr(name):
 
 if __name__ == '__main__':
    # --- load debug information
-    load_debug_information('global.deb')
+    load_debug_information(argv[1]+'.deb')
     table = parse_vcd('system.vcd',siglist = \
     ['system_tb.clk', \
     'system_tb.uut.picorv32_core.reg_pc[31:0]', \
