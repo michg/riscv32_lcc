@@ -263,11 +263,11 @@ reg:	lab			"\tla x%c,%0\n"	1
 reg:    con         "\tli x%c,%0\n" 1
 
 addr:	reg			"0(x%0)"
-addr:	ADDRFP4			"%a(x8)"
-addr:	ADDRLP4			"%a(x8)"
+addr:	ADDRFP4			"%a+%F(x8)"
+addr:	ADDRLP4			"%a+%F(x8)"
 
-reg:    ADDRFP4			"\taddi x%c,x8,%a\n" 1
-reg:    ADDRLP4			"\taddi x%c,x8,%a\n" 1
+reg:    ADDRFP4			"\taddi x%c,x8,%a+%F\n" 1
+reg:    ADDRLP4			"\taddi x%c,x8,%a+%F\n" 1
 
 
 stmt:	ASGNI1(addr,reg)	"\tsb x%1,%0\n"	1
@@ -533,6 +533,7 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
   Symbol r;
   int sizeisave;
   int saved;
+  int framesizeabs;
   Symbol argregs[6];
 
   usedmask[0] = usedmask[1] = 0;
@@ -584,14 +585,15 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
     maxargoffset = 24;
   }
   sizeisave = 4 * bitcount(usedmask[IREG]);
-  framesize = roundup(maxargoffset + sizeisave + maxoffset , 16);
+  framesize = roundup(maxoffset, 16);
+  framesizeabs = roundup(maxargoffset + sizeisave, 16) + framesize;
   segment(CODE);
   print("\t.align\t4\n");
   print("%s:\n", f->x.name);
   print("\tsw  x8,-4(x2)\n");
-  print("\tmv  x8,x2\n");
-  if (framesize > 0) {
-    print("\taddi x2,x2,-%d\n", framesize);
+  print("\taddi  x8,x2,-%d\n",framesize);
+  if (framesizeabs > 0) {
+    print("\taddi x2,x2,-%d\n", framesizeabs);
   }
   saved = maxargoffset;
   for (i = 0; i < 32; i++) {
@@ -619,7 +621,7 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
         int n = (in->type->size + 3) / 4;
         int i;
         for (i = rn; i < rn + n; i++) {
-          print("\tsw x%d,%d(x8)\n", i, off + (i - rn) * 4);
+          print("\tsw x%d,%d(x8)\n", i, framesize + off + (i - rn) * 4);
         }
       }
     }
@@ -627,7 +629,7 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
   if (variadic(f->type) && callee[i - 1] != NULL) {
     i = callee[i - 1]->x.offset + callee[i - 1]->type->size;
 	for (i = roundup(i, 4)/4; i < 6; i++) {
-      print("\tsw x%d,%d(x8)\n", i + 12, 4 * i);
+      print("\tsw x%d,%d(x8)\n", i + 12, framesize + 4 * i);
     }
   }
   emitcode();
@@ -638,7 +640,7 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
       saved += 4;
     }
   }
-  print("\tmv  x2,x8\n");
+  print("\taddi  x2,x2,%d\n",framesizeabs);
   print("\tlw  x8,-4(x2)\n");  
   print("\tjalr x0,x1,0\n");
   print("\n");
