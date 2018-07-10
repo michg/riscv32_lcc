@@ -590,11 +590,12 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
   segment(CODE);
   print("\t.align\t4\n");
   print("%s:\n", f->x.name);
-  print("\tsw  x8,-4(x2)\n");
-  print("\taddi  x8,x2,-%d\n",framesize);
   if (framesizeabs > 0) {
     print("\taddi x2,x2,-%d\n", framesizeabs);
   }
+  print("\tsw  x8,%d(x2)\n", framesizeabs-4);
+  print("\taddi  x8,x2,%d\n",framesizeabs-framesize);
+  
   saved = maxargoffset;
   for (i = 0; i < 32; i++) {
     if (usedmask[IREG] & (1 << i)) {
@@ -639,9 +640,9 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
       print("\tlw x%d,%d(x2)\n", i, saved);
       saved += 4;
     }
-  }
+  }  
+  print("\tlw  x8,%d(x2)\n",framesizeabs-4);  
   print("\taddi  x2,x2,%d\n",framesizeabs);
-  print("\tlw  x8,-4(x2)\n");  
   print("\tjalr x0,x1,0\n");
   print("\n");
 }
