@@ -258,8 +258,8 @@ void stabsym(Symbol p) {
 		code = N_LSYM;
 	} else
 		assert(0);
-	print("%d\",%d,0,0,%s\n", tc, code,
-		p->scope >= PARAM && p->sclass != EXTERN ? p->x.name : "0");
+	print("%d\",%d,0,0,%d\n", tc, code,
+		p->scope >= PARAM && p->sclass != EXTERN ? (framesize + p->x.offset) : 0);
 }
 
 /* stabtype - output a stab entry for type *p */
