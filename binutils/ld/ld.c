@@ -16,6 +16,10 @@
 #include "../include/ar.h"
 #include "../include/ranlib.h"
 
+#include "set.h"
+#include "atom.h"
+#include "mem.h"
+
 
 /**************************************************************/
 
@@ -69,6 +73,7 @@ int segStartDefined[4] = { 0, 0, 0, 0 };
 unsigned int segStart[4] = { 0, 0, 0, 0 };
 char *segName[4] = { "ABS", "CODE", "DATA", "BSS" };
 char *methodName[6] = { "W32", "R12", "RL12", "RH20", "RS12", "J20" };
+unsigned int *rvcadr;
 
 
 typedef struct reloc {
@@ -126,6 +131,23 @@ int cmpint(const void *x, const void *y) {
 	else
 		return 0;
 }
+
+int cmpint2(const void *x, const void *y) {
+	if (**(int **)x < **(int **)y)
+		return -1;
+	else if (**(int **)x > **(int **)y)
+		return +1;
+	else
+		return 0;
+}
+
+int intcmp(const void *x, const void *y) {
+	return cmpint2(&x, &y);
+} 
+
+unsigned inthash(const void *x) {
+	return *(int *)x;
+} 
 
 int signext32(int n, unsigned int val)
 {
@@ -251,8 +273,11 @@ void freeMemory(void *p) {
 Reloc *relocs = NULL;
 Lelem *clist = NULL;
 Lelem *dlist = NULL;
-Lelem *deflist = NULL;
-Lelem *undeflist = NULL;
+Set_T undefset;
+Set_T defset;
+Set_T rvcset;
+void **rvcarray;
+
 
 void addReloc(int segment, RelocRecord *relRec, Symbol **symMap) {
   Reloc *rel;
@@ -323,14 +348,6 @@ Lelem *newLelem(int cmp(const void *x, const void *y)) {
   return p;
 }
 
-// return previous except for first
-Lelem *findprevLelem(Lelem *list, void *cmpptr) {
-  Lelem *p = list;
-  while(list!=NULL && list->cmp(list->valptr, cmpptr)!=0) {
-      p=list;list=list->next;
-  }
-  return((list==NULL) ? NULL : p);
-}
 
 void foreachLelem(Lelem *list, void op(Lelem *x)) {
     Lelem *p = list;
@@ -341,78 +358,10 @@ void foreachLelem(Lelem *list, void op(Lelem *x)) {
 }
 
 
-void pushStringlist(Lelem **list, char *str) {
-  Lelem *p;
-  p = newLelem(cmpstring);
-  p->next = *list;
-  p->valptr = allocateMemory(strlen(str) + 1);
-  strcpy(p->valptr, str);
-  *list = p;  
-}
-
-int popStringlist(Lelem **list, char **str) {
-  if(*list == NULL) return(-1);
-  Lelem *p = *list;
-  *list = p->next;
-  *str = (char *) p->valptr;
-  free(p);
-  return(0);
-}
-
-int removeStringlist(Lelem **list, char *strptr) {
-  Lelem *p = findprevLelem(*list, strptr), *q;
-  if(p == NULL) return(-1);  
-  if (p == *list) {
-      *list = (*list)->next;
-      free(p);
-      return(0);
-  }
-  q = p->next;  
-  p->next = p->next->next; 
-  free(q);  
-  return(0);
-}
-
-
-int insertlist(int number) {
- Lelem *p, *q, *r;
- int pos;
- p = clist;
- q = NULL;
- pos = 1;
- while((p!=NULL) && (number>*(unsigned int*)p->valptr)) {
-  q = p;
-  p = p->next;
-  pos++;
-  } 
- r = newLelem(cmpint);
- r->valptr = allocateMemory(sizeof(number));
- *(int *)r->valptr = number;
- r->next = p;
- if(q!=NULL) q->next = r; else clist=r;
- return(pos);
-}
-
-int getpos(int number) {
- Lelem *p;
- int pos=1;
- p=clist;
- while((p!=NULL) && (number!=*(unsigned int*)p->valptr)) {
-  p = p->next;
-  pos++;
-  }
-  if(p==NULL) return(-1); else return(pos);
-}
-
-int getmaxpos(int number) {
- Lelem *p;
- int pos=1;
- p=clist;
- while((p!=NULL) && (number>*(unsigned int*)p->valptr)) {
-  p = p->next;
-  pos++;
-  }
-  return(pos-1);
+int getmaxpos2(int number) {
+ int i=0;
+ while((i<Set_length(rvcset)) && (number > *(unsigned int*)rvcarray[i])) i++;
+ return(i);
 }
 
 void fixupRef(Reloc *rel, int scan) {
@@ -425,19 +374,20 @@ void fixupRef(Reloc *rel, int scan) {
   int rvcmatch=0;
   int rvcdelta=0;
   int deltadst=0,deltaofs=0;
+  
 
   if(scan==0){
     if(rel->segment==SEGMENT_CODE) {
     switch (rel->method) {
-      case METHOD_RL12: case METHOD_RS12: deltaofs = 2*getmaxpos(rel->offset-4);break;
-      default: deltaofs = 2*getmaxpos(rel->offset);
+      case METHOD_RL12: case METHOD_RS12: deltaofs = 2*getmaxpos2(rel->offset-4);break;
+      default: deltaofs = 2*getmaxpos2(rel->offset);
       }
     }
     else deltaofs = 0;
     if(rel->base.segment==SEGMENT_CODE)
-      deltadst = 2*getmaxpos(rel->value);
+      deltadst = 2*getmaxpos2(rel->value);
     else
-      deltadst=2*getmaxpos(segStart[SEGMENT_DATA])&~(SEGALIGN-1);
+      deltadst=2*getmaxpos2(segStart[SEGMENT_DATA])&~(SEGALIGN-1);
     rvcdelta = deltadst-deltaofs;
    }
 
@@ -603,7 +553,9 @@ void fixupRef(Reloc *rel, int scan) {
       break;
   }
   if(rvcmatch && scan==1) {
-   insertlist((rel->offset)+2);
+   NEW(rvcadr);   
+   *rvcadr = (rel->offset)+2;
+   Set_put(rvcset, rvcadr);		
   }
   /* output debugging info */
   if (debugFixup) {
@@ -638,6 +590,14 @@ void relocateSegments(void) {
     fixupRef(rel, 1);
     rel = rel->next;
   }
+  //rvclist = List_reverse(rvclist);
+  //rvcarray = List_toArray(rvclist, NULL);  
+    rvcarray = Set_toArray(rvcset, NULL);
+  //printf("Len:%d\n",Set_length(rvcset));
+   //for(i=0;i<Set_length(rvcset);i++) printf("BS: %d\r\n", *(unsigned int*)rvcarray[i]);
+    qsort(rvcarray, Set_length(rvcset), sizeof (*rvcarray),  cmpint2); 
+   //for(i=0;i<Set_length(rvcset);i++) printf("AS: %d\r\n", *(unsigned int*)rvcarray[i]);
+  
   updatesymbols();
   while (relocs != NULL) {
     rel = relocs;
@@ -888,13 +848,11 @@ void readSymbols(void) {
         /* the value is the sum of the value given in the file */
         /* and this module's segment start of the symbol's segment */
         sym->type = symRec.type;
-        sym->value = symRec.value + segPtr[symRec.type];
-        //lookupEnter(&defTable, strBuf, NULL, symRec.debug);
-        pushStringlist(&deflist, strBuf);
+        sym->value = symRec.value + segPtr[symRec.type];        
+		Set_put(defset, Atom_string(strBuf));		
       }
-    } else {      
-      //lookupEnter(&undefTable, strBuf, NULL, symRec.debug);
-      pushStringlist(&undeflist, strBuf);
+    } else {            
+	  Set_put(undefset, Atom_string(strBuf));	  
       /* the symbol is undefined in this symbol record */
       /* nothing to do here: lookupEnter already entered */
       /* the symbol into the symbol table, if necessary */
@@ -1003,7 +961,7 @@ void printToDebFile(void) {
 }
 
 void updatesymbol(Symbol *s) {
-  s->rvcdelta=2*getmaxpos(s->value);
+  s->rvcdelta=2*getmaxpos2(s->value);
 }
 
 void updatesymbols(void) {
@@ -1032,16 +990,18 @@ void writeHeader(void) {
 
 void writeCode(void) {
   int data;
-  int pos=0;
+  unsigned int pos=0;
   rewind(codeFile);
+
   while (1) {
     data = fgetc(codeFile);
     if (data == EOF) {
       break;
     }
-    if(getpos(pos)==-1)
-     fputc(data, outFile);
-    else {
+
+    if(!Set_member(rvcset, &pos))		
+     fputc(data, outFile);	 
+    else { 
      data = fgetc(codeFile);
      pos++;
     }
@@ -1053,7 +1013,7 @@ void writeCode(void) {
 void writeData(void) {
   int i, data = 0;
   rewind(dataFile);
-  for(i=0;i<(2*getmaxpos(segStart[SEGMENT_DATA])&(SEGALIGN-1));i++) fputc(data, outFile);;
+  for(i=0;i<(2*getmaxpos2(segStart[SEGMENT_DATA])&(SEGALIGN-1));i++) fputc(data, outFile);;
   while (1) {
     data = fgetc(dataFile);
     if (data == EOF) {
@@ -1219,12 +1179,13 @@ int main(int argc, char *argv[]) {
   char *argp;
   char* dot;
   unsigned int *ssp;
-  int *ssdp;
-  char *bufptr;
-  Lelem *litemptr;
+  int *ssdp;  
   Symbol *Sym;
-  char *tmp;
-  
+  char *tmp;  
+  undefset = Set_new(0, NULL, NULL); 
+  defset = Set_new(0, NULL, NULL);
+  //rvcset =  Set_new(0, cmpint2, inthash); 
+  rvcset =  Set_new(0, intcmp, inthash); 
   tmpnam(codeName);
   tmpnam(dataName);
   outName = "a.out";
@@ -1344,23 +1305,26 @@ int main(int argc, char *argv[]) {
       inFile = NULL;
     }
   } while (++i < argc);
+
+  void **lines = Set_toArray(defset, NULL);
   
-  while(popStringlist(&deflist, &bufptr)==0) {  
-      removeStringlist(&undeflist, bufptr); 
-  }  
+  for (i = 0; lines[i]; i++)   
+	  Set_remove(undefset, Atom_string(lines[i])); 	   
+  free(lines);  
+  lines = Set_toArray(undefset, NULL); 
+  
   if(libName) {
       readlibsymbols(libName);      
-      printf("Resolving:\r\n");
-      litemptr = undeflist;       
-      while (litemptr) {   
-		  Sym = lookup(libsymbolTable, litemptr->valptr);          
+      printf("Resolving:\r\n");      
+	  for (i = 0; lines[i]; i++) {	  
+		  Sym = lookup(libsymbolTable, lines[i]);
           if(Sym) {            
             strcpy(destfile, outpath);
             strcat(destfile, Sym->filename);            
           }
           if(Sym && stat(destfile, &buf)!=0) {
-			  printf("Extracting %s for %s from archive %s\r\n", Sym->filename, Sym->name, libName);
-			  removeStringlist(&undeflist, Sym->name);                    
+			  printf("Extracting %s for %s from archive %s\r\n", Sym->filename, Sym->name, libName);			  
+			  Set_remove(undefset, Atom_string(Sym->name));
 			  extractfilefromlib(libName, Sym->filename);              
 			  inFile = fopen(destfile, "rb");
 			  if (inFile == NULL) {
@@ -1371,11 +1335,13 @@ int main(int argc, char *argv[]) {
 			  if (inFile != NULL) {
 				fclose(inFile);                
 				inFile = NULL;
-              }
-			 litemptr = undeflist;              
+              }			 
+			 FREE(lines);
+			 lines = Set_toArray(undefset, NULL);			 
+			 i = -1;
           }
-          else litemptr=litemptr->next;
       }	  
+	  FREE(lines);
   }
   fprintf(stderr, "Linking modules...\n");
   linkSymbols();

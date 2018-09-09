@@ -88,7 +88,7 @@ static Symbol freg2[32];
 static Symbol freg2w;
 static Symbol blkreg;
 static int tmpregs[] = { 11, 6, 7 };
-
+static int hardfloat = 0;
 %}
 
 %start stmt
@@ -407,15 +407,22 @@ stmt:	ASGNB(reg,INDIRB(reg))	"# asgnb %0 %1\n"	1
 
 reg:	INDIRF4(VREGP)		"# read register\n"
 stmt:	ASGNF4(VREGP,reg)	"# write register\n"
+
+reg:	ADDF4(reg,reg)		"\tfmv.s.x f1,x%0\n\tfmv.s.x f2,x%1\nfadd.s f0,f1,f2\n\tfmv.x.s x%c,f0\n"	(hardfloat?10:LBURG_MAX) 
+reg:	SUBF4(reg,reg)		"\tfmv.s.x f1,x%0\n\tfmv.s.x f2,x%1\nfsub.s f0,f1,f2\n\tfmv.x.s x%c,f0\n"	(hardfloat?10:LBURG_MAX)
+reg:	MULF4(reg,reg)		"\tfmv.s.x f1,x%0\n\tfmv.s.x f2,x%1\nfmul.s f0,f1,f2\n\tfmv.x.s x%c,f0\n"	(hardfloat?10:LBURG_MAX)
+reg:	DIVF4(reg,reg)		"\tfmv.s.x f1,x%0\n\tfmv.s.x f2,x%1\nfdiv.s f0,f1,f2\n\tfmv.x.s x%c,f0\n"	(hardfloat?10:LBURG_MAX)
 reg:	ADDF4(reg,reg)		"\tjal x1,float32_add\n"	100
 reg:	SUBF4(reg,reg)		"\tjal x1,float32_sub\n"	100
 reg:	MULF4(reg,reg)		"\tjal x1,float32_mul\n"	100
-reg:	DIVF4(reg,reg)		"\tjal x1,float32_div\n"	100
+reg:	DIVF4(reg,reg)		"\tjal x1,float32_div\n"	100 
 reg:	LOADF4(reg)		"\taddi x%c,x%0,0\n"	move(a)
 reg:	NEGF4(reg)		"\tjal x1,float32_neg\n"	100
 reg:	CVFF4(reg)		"\t"	100
 reg:	CVIF4(reg)		"\tjal x1,int32_to_float32\n"	100
+reg:	CVIF4(reg)		"\tfcvt.s.w f0,x%0\n\tfmv.x.s x%c,f0\n"	(hardfloat?10:LBURG_MAX)
 reg:	CVFI4(reg)		"\tjal x1,float32_to_int32\n" 	100
+reg:	CVFI4(reg)		"\tfmv.s.x f0,x%0\n\tfcvt.w.s x%c,f0\n"	(hardfloat?10:LBURG_MAX)
 stmt:	EQF4(reg,reg)		"\tbeq x%0,x%1,%a\n"   1
 stmt:	LEF4(reg,reg)           "\tand x10,x%0,x%1\n\tsrli x10,x10,31\n\tbne x10,x0,.+12\n\tble x%0,x%1,%a\n\tbeq x0,x0,.+8\n\tble x%1,x%0,%a\n"   4
 stmt:	LTF4(reg,reg)           "\tand x10,x%0,x%1\n\tsrli x10,x10,31\n\tbne x10,x0,.+12\n\tblt x%0,x%1,%a\n\tbeq x0,x0,.+8\n\tblt x%1,x%0,%a\n"   4
@@ -426,6 +433,7 @@ stmt:	NEF4(reg,reg)		"\tbne x%0,x%1,%a\n"   1
 
 
 %%
+
 
 
 static void address(Symbol s1, Symbol s2, long n) {
@@ -688,6 +696,11 @@ static void progbeg(int argc, char *argv[]) {
   setSwap();
   segment(CODE);
   parseflags(argc, argv);
+  for (i = 0; i < argc; i++)
+		if (strcmp(argv[i], "-hf") == 0)
+			hardfloat = 1;
+		else  if (strcmp(argv[i], "-d") == 0)
+			dflag = 1;		
   for (i = 0; i < 32; i++) {
     ireg[i] = mkreg("%d", i, 1, IREG);
   }

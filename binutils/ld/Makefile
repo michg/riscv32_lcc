@@ -9,7 +9,7 @@ CFLAGS = -g -Wall
 LDFLAGS = -g
 LDLIBS = -lm
 
-SRCS = ld.c
+SRCS = ld.c set.c atom.c
 OBJS = $(patsubst %.c,%.o,$(SRCS))
 BIN = ld
 

@@ -27,7 +27,8 @@
 #define TOK_IDENT	2
 #define TOK_STRING	3
 #define TOK_NUMBER	4
-#define TOK_REGISTER	5
+#define TOK_IREGISTER	5
+
 #define TOK_PLUS	6
 #define TOK_MINUS	7
 #define TOK_STAR	8
@@ -43,6 +44,7 @@
 #define TOK_BAR		18
 #define TOK_CARET	19
 #define TOK_DOTRELADR 	20
+#define TOK_FREGISTER	21
 
 #define STATUS_UNKNOWN	0	/* symbol is not yet defined */
 #define STATUS_DEFINED	1	/* symbol is defined */
@@ -61,6 +63,28 @@
 #define DBG_VARLOCREG 6
 /**************************************************************/
 
+
+
+#define OP_ADDF		0x007
+#define OP_SUBF		0x047
+#define OP_MULF		0x087
+#define OP_DIVF		0x0C7
+#define OP_SQRTF    0x2C7
+#define OP_MVSXF    0x780
+#define OP_MVXSF    0x700
+#define OP_CVTSWF    0x687
+#define OP_CVTSWUF    0x68F
+#define OP_CVTWSF    0x607
+#define OP_CVTWUSF    0x60F
+#define OP_EQF		0x502
+#define OP_EQF		0x502
+#define OP_LTF		0x501
+#define OP_LEF		0x500
+
+#define OP_MINF     0x140
+#define OP_MAXF     0x141
+#define OP_LWF		0x20
+#define OP_SWF		0x2
 
 #define OP_ADD		0x000
 #define OP_SUB		0x100
@@ -298,7 +322,7 @@ int getNextToken(void) {
   if (*lineptr == '\n' || *lineptr == '\0' || *lineptr == ';') {
     return TOK_EOL;
   }
-  if (*lineptr == 'x') {
+  if (*lineptr == 'x'){
     lineptr++;
      if (!isdigit((int) *lineptr)) {
        lineptr--;
@@ -313,7 +337,25 @@ int getNextToken(void) {
        if (tokenvalNumber < 0 || tokenvalNumber >= NUM_REGS) {
          error("illegal register number %d in line %d", tokenvalNumber, lineno);
        }
-       return TOK_REGISTER;
+       return TOK_IREGISTER;
+     }
+  }
+  if (*lineptr == 'f'){
+    lineptr++;
+     if (!isdigit((int) *lineptr)) {
+       lineptr--;
+     }
+     else {
+       tokenvalNumber = 0;
+       while (isdigit((int) *lineptr)) {
+         digit = *lineptr++ - '0';
+         tokenvalNumber *= 10;
+         tokenvalNumber += digit;
+       }
+       if (tokenvalNumber < 0 || tokenvalNumber >= NUM_REGS) {
+         error("illegal register number %d in line %d", tokenvalNumber, lineno);
+       }
+       return TOK_FREGISTER;
      }
   }
   if (*lineptr == '.' && *(lineptr + 1) == '+') {
@@ -477,8 +519,11 @@ void showToken(void) {
     case TOK_NUMBER:
       printf("token = TOK_NUMBER, value = 0x%x\n", tokenvalNumber);
       break;
-    case TOK_REGISTER:
-      printf("token = TOK_REGISTER, value = %d\n", tokenvalNumber);
+    case TOK_IREGISTER:
+      printf("token = TOK_IREGISTER, value = %d\n", tokenvalNumber);
+      break;
+	 case TOK_FREGISTER:
+      printf("token = TOK_FREGISTER, value = %d\n", tokenvalNumber);
       break;
     case TOK_PLUS:
       printf("token = TOK_PLUS\n");
@@ -1333,7 +1378,7 @@ void dotAlign(unsigned int code) {
       emitByte(0x0);
     } else {
       if(mask&2){
-        emitHalf(0x0);
+        emitHalf(0x1);
       } else {
         emitWord(0x13);
       }
@@ -1464,37 +1509,122 @@ void formatR(unsigned int code) {
   int dst, src1, src2;
 
   /* opcode with three register operands */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
   getToken();
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   src1 = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
   getToken();
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   src2 = tokenvalNumber;
   getToken();
   emitWord(((code>>3)&0x7F) << 25 | src2 << 20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x33);
+}
+
+void formatRF(unsigned int code) {
+  int dst, src1, src2;
+
+  /* opcode with three register operands */
+  expect(TOK_FREGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_FREGISTER);
+  src1 = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_FREGISTER);
+  src2 = tokenvalNumber;
+  getToken();
+  emitWord(((code>>4)&0x7F) << 25 | src2 << 20 | src1 << 15 | (code&7)<<12 | dst<<7 | 0x53);
+}
+
+void formatRF2(unsigned int code) {
+  int dst, src1;
+
+  /* opcode with three register operands */
+  expect(TOK_FREGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_FREGISTER);
+  src1 = tokenvalNumber;
+  getToken();
+  emitWord(((code>>4)&0x7F) << 25 | src1 << 15 | (code&7)<<12 | dst<<7 | 0x53);
+}
+
+void formatRXF(unsigned int code) {
+  int dst, src1;
+
+  /* opcode with three register operands */
+  expect(TOK_IREGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_FREGISTER);
+  src1 = tokenvalNumber;
+  getToken();
+  emitWord(((code>>4)&0x7F) << 25 | ((code>>3)&1)<<20 | src1 << 15 | (code&7)<<12 | dst<<7 | 0x53);
+}
+
+void formatRFX(unsigned int code) {
+  int dst, src1;
+
+  /* opcode with three register operands */
+  expect(TOK_FREGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_IREGISTER);
+  src1 = tokenvalNumber;
+  getToken();
+  emitWord(((code>>4)&0x7F) << 25 | ((code>>3)&1)<<20 | src1 << 15 | (code&7)<<12 | dst<<7 | 0x53);
+}
+
+void formatRCMPF(unsigned int code) {
+  int dst, src1, src2;
+
+  /* opcode with three register operands */
+  expect(TOK_IREGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_FREGISTER);
+  src1 = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_FREGISTER);
+  src2 = tokenvalNumber;
+  getToken();
+  emitWord(((code>>4)&0x7F) << 25 | src2 << 20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x53);
 }
 
 void formatR2(unsigned int code) {
   int dst, src1, src2;
 
   /* opcode with three register operands */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
   getToken();
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   src1 = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
   getToken();
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   src2 = tokenvalNumber;
   getToken();
   if(rvc==0 || (rvcreg(dst)==0) || (src2>15) || (src2<8) || src1!=dst)
@@ -1507,12 +1637,12 @@ void formatRC2(unsigned int code) {
   int dst, src2;
 
   /* opcode with three register operands */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
   getToken();
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   src2 = tokenvalNumber;
   getToken();
   emitHalf(4<<13 | 3<<10 | (dst-8)<<7 | countbits(code&0x7)<<5 | (src2-8)<<2 | 0x1);
@@ -1524,12 +1654,12 @@ void formatSB(unsigned int code) {
   unsigned int immed;
 
   /* opcode with two registers and a 12 bit signed offset operand */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   src1 = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
   getToken();
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   src2 = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
@@ -1558,7 +1688,7 @@ void formatS(unsigned int code) {
   int rvccond;
 
   /* opcode with two registers and a 12 bit signed offset operand */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   src2 = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
@@ -1569,7 +1699,7 @@ void formatS(unsigned int code) {
     vcon = v.con;
     expect(TOK_LPAREN);
     getToken();
-    expect(TOK_REGISTER);
+    expect(TOK_IREGISTER);
     src1 = tokenvalNumber;
     getToken();
     expect(TOK_RPAREN);
@@ -1577,7 +1707,7 @@ void formatS(unsigned int code) {
   } else {
     expect(TOK_COMMA);
     getToken();
-    expect(TOK_REGISTER);
+    expect(TOK_IREGISTER);
     src1 = tokenvalNumber;
     getToken();
     addFixup(v.sym, currSeg, segPtr[currSeg], METHOD_RH20, v.con);
@@ -1596,6 +1726,46 @@ void formatS(unsigned int code) {
    emitWord(((immed>>5)&0x7F)<<25 | src2<<20 | src1<<15 |(code&0x7)<<12| (immed&0x1F)<<7 | 0x23);
 }
 
+void formatSF(unsigned int code) {
+  int src1, src2, vcon;
+  Value v;
+  unsigned int immed;
+  
+
+  /* opcode with two registers and a 12 bit signed offset operand */
+  expect(TOK_FREGISTER);
+  src2 = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  v = parseExpression();
+  if (v.sym == NULL) {
+    immed = v.con;
+    vcon = v.con;
+    expect(TOK_LPAREN);
+    getToken();
+    expect(TOK_IREGISTER);
+    src1 = tokenvalNumber;
+    getToken();
+    expect(TOK_RPAREN);
+    getToken();
+  } else {
+    expect(TOK_COMMA);
+    getToken();
+    expect(TOK_IREGISTER);
+    src1 = tokenvalNumber;
+    getToken();
+    addFixup(v.sym, currSeg, segPtr[currSeg], METHOD_RH20, v.con);
+    immed = 0;
+    emitWord( immed | src1<<7 | 0x17);
+    immed = v.con;
+    addFixup(v.sym, currSeg, segPtr[currSeg], METHOD_RS12, v.con);
+    immed = 0;
+  }
+   emitWord(((immed>>5)&0x7F)<<25 | src2<<20 | src1<<15 |(code&0x7)<<12| (immed&0x1F)<<7 | 0x27);
+}
+
+
 void formatIm(unsigned int code) {
   int dst, src1;
   Value v;
@@ -1603,12 +1773,12 @@ void formatIm(unsigned int code) {
 
   /* opcode with two register operands and immediate */
   if((code&0x8)==0) {
-    expect(TOK_REGISTER);
+    expect(TOK_IREGISTER);
     dst = tokenvalNumber;
     getToken();
     expect(TOK_COMMA);
     getToken();
-    expect(TOK_REGISTER);
+    expect(TOK_IREGISTER);
     src1 = tokenvalNumber;
     getToken();
     expect(TOK_COMMA);
@@ -1636,12 +1806,12 @@ void formatMv(unsigned int code) {
   int dst, src1;
   
   /* opcode with two registers */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
   getToken();
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   src1 = tokenvalNumber;
   getToken();
   
@@ -1656,7 +1826,7 @@ void formatCIm(unsigned int code) {
 
   /* opcode with two register operands and immediate */
   if((code&0x8)==0) {
-    expect(TOK_REGISTER);
+    expect(TOK_IREGISTER);
     dst = tokenvalNumber;
     getToken();
     expect(TOK_COMMA);
@@ -1677,12 +1847,12 @@ void formatIm2(unsigned int code) {
   unsigned int immed;
 
   /* opcode with two register operands and immediate */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
   getToken();
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   src1 = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
@@ -1703,7 +1873,7 @@ void formatCIm2(unsigned int code) {
   unsigned int immed;
 
   /* opcode with two register operands and immediate */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
@@ -1720,12 +1890,12 @@ void formatIm3(unsigned int code) {
   unsigned int immed;
 
   /* opcode with two register operands and immediate */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
   getToken();
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   src1 = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
@@ -1742,7 +1912,7 @@ void formatLIm(unsigned int code) {
   unsigned int immed;
 
   /* load opcode with two register operands and immediate */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
@@ -1753,7 +1923,7 @@ void formatLIm(unsigned int code) {
     vcon = v.con;
     expect(TOK_LPAREN);
     getToken();
-    expect(TOK_REGISTER);
+    expect(TOK_IREGISTER);
     src1 = tokenvalNumber;
     getToken();
     expect(TOK_RPAREN);
@@ -1776,18 +1946,53 @@ void formatLIm(unsigned int code) {
     emitWord( immed<<20 | src1 << 15 | ((code>>4)&0x7)<<12 | dst<<7 | (code&0xF)<<3 | 0x3);
 }
 
+void formatLFIm(unsigned int code) {
+  int dst, src1, vcon;
+  Value v;
+  unsigned int immed;
+
+  /* load opcode with two register operands and immediate */
+  expect(TOK_FREGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  v = parseExpression();
+  if (v.sym == NULL) {
+    immed = v.con;
+    vcon = v.con;
+    expect(TOK_LPAREN);
+    getToken();
+    expect(TOK_IREGISTER);
+    src1 = tokenvalNumber;
+    getToken();
+    expect(TOK_RPAREN);
+    getToken();
+  } else {
+    addFixup(v.sym, currSeg, segPtr[currSeg], METHOD_RH20, v.con);
+    immed = 0;
+    emitWord( immed | dst<<7 | 0x17);
+    immed = v.con;
+    addFixup(v.sym, currSeg, segPtr[currSeg], METHOD_RL12, v.con);
+    immed = 0;
+    src1 = dst;
+  }
+    emitWord( immed<<20 | src1 << 15 | ((code>>4)&0x7)<<12 | dst<<7 | (code&0xF)<<3 | 0x7);
+}
+
+
 void formatSIm(unsigned int code) {
   int dst, src1;
   Value v;
   unsigned int immed;
 
   /* shift opcode with two register operands and immediate */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
   getToken();
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   src1 = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
@@ -1807,7 +2012,7 @@ void formatSCIm(unsigned int code) {
   unsigned int immed;
 
   /* shift opcode with two register operands and immediate */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
@@ -1823,7 +2028,7 @@ void formatUJ(unsigned int code) {
   Value v;
 
   /* jal opcode with one register operands and label */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
@@ -1839,12 +2044,12 @@ void formatJR(unsigned int code) {
   unsigned int immed;
 
   /* opcode with two register operands and immediate */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
   getToken();
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   src1 = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
@@ -1862,7 +2067,7 @@ void formatLI(unsigned int code) {
   unsigned int immed;
 
   /* opcode with one register operands and immediate */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   src = 0;
   getToken();
@@ -1891,7 +2096,7 @@ void formatLUI(unsigned int code) {
   unsigned int immed;
 
   /* opcode with one register operands and immediate */
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   getToken();
   expect(TOK_COMMA);
@@ -1910,7 +2115,7 @@ void formatBRK(unsigned int code) {
 
 void formatC(unsigned int code) {
   int dst;
-  expect(TOK_REGISTER);
+  expect(TOK_IREGISTER);
   dst = tokenvalNumber;
   getToken();
   emitWord( 0xC0<<24 |code<<20 | 2<<12 | dst<<7 | 0x73);
@@ -1944,8 +2149,26 @@ Instr instrTable[] = {
   { ".loc",    dotLoc,    0 },
   { ".stabs",  dotStabs,  0 },
   { ".stabn",  dotStabn,  0 },
-
-  /* arithmetical instructions */
+   /* single precision floating point instructions */
+  { "fadd.s",  formatRF, OP_ADDF  },
+  { "fsub.s",  formatRF, OP_SUBF  },
+  { "fmul.s",  formatRF, OP_MULF  },
+  { "fdiv.s",  formatRF, OP_DIVF  },
+  { "fmin.s",  formatRF, OP_MINF  },
+  { "fmax.s",  formatRF, OP_MAXF  },
+  { "flw",    formatLFIm, OP_LWF },
+  { "fsw",    formatSF, OP_SWF }, 
+  { "fsqrt.s",  formatRF2, OP_SQRTF  },
+  { "fmv.s.x",  formatRFX, OP_MVSXF  },
+  { "fmv.x.s",  formatRXF, OP_MVXSF  },
+  { "fcvt.s.w",  formatRFX, OP_CVTSWF  },
+  { "fcvt.s.wu",  formatRFX, OP_CVTSWUF  },
+  { "fcvt.w.s",  formatRXF, OP_CVTWSF  },
+  { "fcvt.wu.s",  formatRXF, OP_CVTWUSF  },
+  { "feq.s",  formatRCMPF, OP_EQF  },
+  { "flt.s",  formatRCMPF, OP_LTF  },
+  { "fle.s",  formatRCMPF, OP_LEF  },
+   /* arithmetical instructions */
   { "add",     formatR, OP_ADD  },
   { "sub",     formatR2, OP_SUB  },
   { "c.sub",   formatRC2, OP_SUB  },
