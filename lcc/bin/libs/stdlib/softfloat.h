@@ -96,11 +96,12 @@ float32 float32_rem( float32, float32 );
 float32 float32_sqrt( float32 );
 int float32_eq( float32, float32 );
 int float32_le( float32, float32 );
+int float32_ge( float32, float32 );
 int float32_lt( float32, float32 );
 int float32_eq_signaling( float32, float32 );
 int float32_le_quiet( float32, float32 );
 int float32_lt_quiet( float32, float32 );
 int float32_is_signaling_nan( float32 );
+int float32_is_nan( float32) ;
 
-
-int float32_neg (int);
+float32 float32_neg (float32);

@@ -69,6 +69,9 @@
 #define OP_SUBF		0x047
 #define OP_MULF		0x087
 #define OP_DIVF		0x0C7
+#define OP_SGNJF	0x100
+#define OP_SGNJNF	0x101
+#define OP_SGNJXF	0x102
 #define OP_SQRTF    0x2C7
 #define OP_MVSXF    0x780
 #define OP_MVXSF    0x700
@@ -2154,6 +2157,9 @@ Instr instrTable[] = {
   { "fsub.s",  formatRF, OP_SUBF  },
   { "fmul.s",  formatRF, OP_MULF  },
   { "fdiv.s",  formatRF, OP_DIVF  },
+  { "fsgnj.s",  formatRF, OP_SGNJF },
+  { "fsgnjn.s",  formatRF, OP_SGNJNF },
+  { "fsgnjx.s",  formatRF, OP_SGNJXF },
   { "fmin.s",  formatRF, OP_MINF  },
   { "fmax.s",  formatRF, OP_MAXF  },
   { "flw",    formatLFIm, OP_LWF },

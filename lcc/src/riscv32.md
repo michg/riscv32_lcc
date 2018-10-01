@@ -74,21 +74,24 @@ static void doarg(Node);
 static void target(Node);
 static void clobber(Node);
 static int mulops_calls(int op);
+static int move100(Node p);
+static int movehard(Node p);
 
 #define INTTMP	0x700000E0
 #define INTVAR	0x0FFC0000
 #define INTRET	0x00000400
-#define FLTTMP	0x000F0FF0
-#define FLTVAR	0xFFF00000
-#define FLTRET	0x00000003
+#define FLTTMP	0xF00000FF
+#define FLTVAR	0x0FFC0300
+#define FLTRET	0x00000400
 
 static Symbol ireg[32];
 static Symbol iregw;
-static Symbol freg2[32];
-static Symbol freg2w;
+static Symbol freg[32];
+static Symbol fregw;
 static Symbol blkreg;
 static int tmpregs[] = { 11, 6, 7 };
 static int hardfloat = 0;
+
 %}
 
 %start stmt
@@ -277,7 +280,8 @@ stmt:	ASGNP4(addr,reg)	"\tsw x%1,%0\n"	1
 stmt:	ASGNU1(addr,reg)	"\tsb x%1,%0\n"	1
 stmt:	ASGNU2(addr,reg)	"\tsh x%1,%0\n"	1
 stmt:	ASGNU4(addr,reg)	"\tsw x%1,%0\n"	1
-stmt:	ASGNF4(addr,reg)	"\tsw x%1,%0\n"	1
+stmt:	ASGNF4(addr,reg)	"\tsw x%1,%0\n"	100
+stmt:	ASGNF4(addr,freg)	"\tfsw f%1,%0\n" (hardfloat?10:LBURG_MAX)
 
 reg:	INDIRI1(addr)		"\tlb x%c,%0\n"	1
 reg:	INDIRI2(addr)		"\tlh x%c,%0\n"	1
@@ -286,7 +290,8 @@ reg:	INDIRP4(addr)		"\tlw x%c,%0\n"	1
 reg:	INDIRU1(addr)		"\tlbu x%c,%0\n"	1
 reg:	INDIRU2(addr)		"\tlhu x%c,%0\n"	1
 reg:	INDIRU4(addr)		"\tlw x%c,%0\n"	1
-reg:	INDIRF4(addr)		"\tlw x%c,%0\n"	1
+reg:	INDIRF4(addr)		"\tlw x%c,%0\n"	100
+freg:   INDIRF4(addr)       "\tflw f%c,%0\n" (hardfloat?10:LBURG_MAX)
 
 
 reg:	CVII4(INDIRI1(addr))	"\tlb x%c,%0\n"	1
@@ -379,6 +384,7 @@ stmt: NEU4(reg,reg)  "\tbne x%0,x%1,%a\n"   1
 
 
 reg:  CALLF4(lab)  "\tjal x1,%0\n"  1
+freg:  CALLF4(lab)  "\tjal x1,%0\n"  !hardfloat
 
 reg:  CALLI4(lab)  "\tjal x1,%0\n"  1
 reg:  CALLP4(lab)  "\tjal x1,%0\n"  1
@@ -397,44 +403,67 @@ stmt:	RETP4(reg)		"# ret\n"		1
 stmt:	RETU4(reg)		"# ret\n"		1
 stmt:	RETV(reg)		"# ret\n"		1
 stmt:	RETF4(reg)		"# ret\n"		1
+stmt:	RETF4(freg)		"# ret\n"		!hardfloat
 
 stmt:	ARGI4(reg)		"# arg\n"		1
 stmt:	ARGP4(reg)		"# arg\n"		1
 stmt:	ARGU4(reg)		"# arg\n"		1
 stmt:	ARGF4(reg)		"# arg\n"		1
+stmt:	ARGF4(freg)		"# arg\n"		!hardfloat
 stmt:	ARGB(INDIRB(reg))	"# argb %0\n"		1
 stmt:	ASGNB(reg,INDIRB(reg))	"# asgnb %0 %1\n"	1
 
 reg:	INDIRF4(VREGP)		"# read register\n"
 stmt:	ASGNF4(VREGP,reg)	"# write register\n"
+freg:	INDIRF4(VREGP)		"# read register\n"
+stmt:	ASGNF4(VREGP,freg)	"# write register\n"
 
-reg:	ADDF4(reg,reg)		"\tfmv.s.x f1,x%0\n\tfmv.s.x f2,x%1\nfadd.s f0,f1,f2\n\tfmv.x.s x%c,f0\n"	(hardfloat?10:LBURG_MAX) 
-reg:	SUBF4(reg,reg)		"\tfmv.s.x f1,x%0\n\tfmv.s.x f2,x%1\nfsub.s f0,f1,f2\n\tfmv.x.s x%c,f0\n"	(hardfloat?10:LBURG_MAX)
-reg:	MULF4(reg,reg)		"\tfmv.s.x f1,x%0\n\tfmv.s.x f2,x%1\nfmul.s f0,f1,f2\n\tfmv.x.s x%c,f0\n"	(hardfloat?10:LBURG_MAX)
-reg:	DIVF4(reg,reg)		"\tfmv.s.x f1,x%0\n\tfmv.s.x f2,x%1\nfdiv.s f0,f1,f2\n\tfmv.x.s x%c,f0\n"	(hardfloat?10:LBURG_MAX)
+freg:	SUBF4(freg,freg)		"\tfsub.s f%c, f%0, f%1\n"	(hardfloat?10:LBURG_MAX)
+freg:	MULF4(freg,freg)		"\tfmul.s f%c, f%0, f%1\n"	(hardfloat?10:LBURG_MAX)
+freg:	DIVF4(freg,freg)		"\tfdiv.s f%c, f%0, f%1\n"	(hardfloat?10:LBURG_MAX)
+freg:	ADDF4(freg,freg)		"\tfadd.s f%c, f%0, f%1\n"	(hardfloat?10:LBURG_MAX) 
+freg:	LOADF4(freg)		"\tfsgnj.s f%c, f%0, f%0\n"	movehard(a) 
+freg:	NEGF4(freg)		"\tfsgnjn.s f%c, f%0, f%0\n"	(hardfloat?10:LBURG_MAX) 
+freg:	CVFF4(freg)		"\t"	(hardfloat?10:LBURG_MAX) 
+freg:	CVIF4(reg)		"\tfcvt.s.w f%c, x%0\n"	(hardfloat?10:LBURG_MAX) 
+reg:	CVFI4(freg)		"\tfcvt.w.s x%c, f%0\n"	(hardfloat?10:LBURG_MAX) 
+stmt:	EQF4(freg,freg)		"\tfeq.s x11,f%0,f%1\n\tbne x11,x0,%a\n" (hardfloat?10:LBURG_MAX)
+stmt:	NEF4(freg,freg)		"\tfeq.s x11,f%0,f%1\n\tbeq x11,x0,%a\n" (hardfloat?10:LBURG_MAX)
+stmt:	LEF4(freg,freg)     "\tfle.s x11,f%0,f%1\n\tbne x11,x0,%a\n" (hardfloat?10:LBURG_MAX)
+stmt:	GTF4(freg,freg)     "\tfle.s x11,f%0,f%1\n\tbeq x11,x0,%a\n" (hardfloat?10:LBURG_MAX)
+stmt:	LTF4(freg,freg)  "\tflt.s x11,f%0,f%1\n\tbne x11,x0,%a\n" (hardfloat?10:LBURG_MAX)
+stmt:	GEF4(freg,freg)  "\tflt.s x11,f%0,f%1\n\tbeq x11,x0,%a\n" (hardfloat?10:LBURG_MAX)
+
 reg:	ADDF4(reg,reg)		"\tjal x1,float32_add\n"	100
 reg:	SUBF4(reg,reg)		"\tjal x1,float32_sub\n"	100
 reg:	MULF4(reg,reg)		"\tjal x1,float32_mul\n"	100
 reg:	DIVF4(reg,reg)		"\tjal x1,float32_div\n"	100 
-reg:	LOADF4(reg)		"\taddi x%c,x%0,0\n"	move(a)
+reg:	LOADF4(reg)		"\taddi x%c,x%0,0\n"	move100(a)
 reg:	NEGF4(reg)		"\tjal x1,float32_neg\n"	100
 reg:	CVFF4(reg)		"\t"	100
 reg:	CVIF4(reg)		"\tjal x1,int32_to_float32\n"	100
-reg:	CVIF4(reg)		"\tfcvt.s.w f0,x%0\n\tfmv.x.s x%c,f0\n"	(hardfloat?10:LBURG_MAX)
 reg:	CVFI4(reg)		"\tjal x1,float32_to_int32\n" 	100
-reg:	CVFI4(reg)		"\tfmv.s.x f0,x%0\n\tfcvt.w.s x%c,f0\n"	(hardfloat?10:LBURG_MAX)
-stmt:	EQF4(reg,reg)		"\tbeq x%0,x%1,%a\n"   1
-stmt:	LEF4(reg,reg)           "\tand x10,x%0,x%1\n\tsrli x10,x10,31\n\tbne x10,x0,.+12\n\tble x%0,x%1,%a\n\tbeq x0,x0,.+8\n\tble x%1,x%0,%a\n"   4
-stmt:	LTF4(reg,reg)           "\tand x10,x%0,x%1\n\tsrli x10,x10,31\n\tbne x10,x0,.+12\n\tblt x%0,x%1,%a\n\tbeq x0,x0,.+8\n\tblt x%1,x%0,%a\n"   4
-stmt:	GEF4(reg,reg)           "\tand x10,x%0,x%1\n\tsrli x10,x10,31\n\tbne x10,x0,.+12\n\tbge x%0,x%1,%a\n\tbeq x0,x0,.+8\n\tbge x%1,x%0,%a\n"   4
-stmt:	GTF4(reg,reg)           "\tand x10,x%0,x%1\n\tsrli x10,x10,31\n\tbne x10,x0,.+12\n\tbgt x%0,x%1,%a\n\tbeq x0,x0,.+8\n\tbgt x%1,x%0,%a\n"   4
-stmt:	NEF4(reg,reg)		"\tbne x%0,x%1,%a\n"   1
+stmt:	EQF4(reg,reg)		"\tjal x1,float32_eq\n\tbne x10,x0,%a\n"   100
+stmt:	LEF4(reg,reg)       "\tjal x1,float32_le\n\tbne x10,x0,%a\n"   100
+stmt:	LTF4(reg,reg)       "\tjal x1,float32_lt\n\tbne x10,x0,%a\n"   100
+stmt:	GEF4(reg,reg)       "\tjal x1,float32_ge\n\tbne x10,x0,%a\n"   100
+stmt:	GTF4(reg,reg)       "\tjal x1,float32_gt\n\tbne x10,x0,%a\n"   100
+stmt:	NEF4(reg,reg)		"\tjal x1,float32_ne\n\tbne x10,x0,%a\n"   100
 
 
 
 %%
 
+static int move100(Node p) {
+	p->x.copy = 1;
+	return 100;
+}
 
+static int movehard(Node p) {
+	p->x.copy = 1;
+    if(hardfloat) return 10;
+     else return LBURG_MAX;
+}
 
 static void address(Symbol s1, Symbol s2, long n) {
   if (s2->scope == GLOBAL ||
@@ -531,15 +560,19 @@ static Symbol argreg(int argno, int offset, int ty, int sz, int ty0) {
   if (offset > 20) {
     return NULL;
   }
-  return ireg[(offset / 4) + 12];
+  if(hardfloat && ty==F)
+    return freg[(offset / 4) + 12];
+  else
+   return ireg[(offset / 4) + 12];
 }
 
 
 static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
-  int i;
+  int i, varargs;
   Symbol p, q;
   Symbol r;
   int sizeisave;
+  int sizefsave;
   int saved;
   int framesizeabs;
   Symbol argregs[6];
@@ -549,6 +582,12 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
   offset = 0;
   maxoffset = 0;
   maxargoffset = 0;
+  
+  for (i = 0; callee[i]; i++); 
+  varargs = variadic(f->type)
+                || i > 0 && strcmp(callee[i-1]->name, "va_alist") == 0; 
+  assert(caller[i] == NULL);  
+  
   for (i = 0; callee[i] != NULL; i++) {
     p = callee[i];
     q = caller[i];
@@ -562,8 +601,8 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
       argregs[i] = r;
     }
     offset = roundup(offset + q->type->size, 4);
-    if (variadic(f->type)) {
-      p->sclass = AUTO;
+    if (varargs) {      
+      p->sclass = AUTO;       
     } else
     if (r != NULL && ncalls == 0 && !isstruct(q->type) &&
         !p->addressed && !(isfloat(q->type) && r->x.regnode->set == IREG)) {
@@ -571,30 +610,32 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
       askregvar(p, r);
       assert(p->x.regnode && p->x.regnode->vbl == p);
       q->x = p->x;
-      q->type = p->type;
-    } else
+      q->type = p->type;       
+    } else {    
     if (askregvar(p, rmap(ttob(p->type))) &&
         r != NULL && (isint(p->type) || p->type == q->type)) {
       assert(q->sclass != REGISTER);
       p->sclass = q->sclass = REGISTER;
-      q->type = p->type;
+      q->type = p->type;      
+    }
     }
   }
-  assert(caller[i] == NULL);  
+  
   offset = 4;
   gencode(caller, callee);
   if (ncalls != 0) {
     usedmask[IREG] |= ((unsigned) 1) << 1;
   }
   usedmask[IREG] &= 0x0FFC0002;
-  usedmask[FREG] &= 0xFFF00000;
+  usedmask[FREG] &= 0x0FFC0000;
   maxargoffset = roundup(maxargoffset, 4);
   if (ncalls != 0 && maxargoffset < 16) {
     maxargoffset = 24;
   }
   sizeisave = 4 * bitcount(usedmask[IREG]);
+  sizefsave = 4 * bitcount(usedmask[FREG]);
   framesize = roundup(maxoffset, 16);
-  framesizeabs = roundup(maxargoffset + sizeisave, 16) + framesize;
+  framesizeabs = roundup(maxargoffset + sizeisave + sizefsave, 16) + framesize;
   segment(CODE);
   print("\t.align\t4\n");
   print("%s:\n", f->x.name);
@@ -606,6 +647,12 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
   
   saved = maxargoffset;
   for (i = 0; i < 32; i++) {
+    if (usedmask[FREG] & (1 << i)) {
+      print("\tfsw f%d,%d(x2)\n", i, saved);
+      saved += 4;
+    }
+  }
+  for (i = 0; i < 32; i++) {
     if (usedmask[IREG] & (1 << i)) {
       print("\tsw x%d,%d(x2)\n", i, saved);
       saved += 4;
@@ -613,7 +660,7 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
   }
   for (i = 0; i < 6 && callee[i] != NULL; i++) {
     r = argregs[i];
-    if (r && r->x.regnode != callee[i]->x.regnode) {
+    if (r && r->x.regnode != callee[i]->x.regnode) {      
       Symbol out = callee[i];
       Symbol in = caller[i];
       int rn = r->x.regnode->number;
@@ -624,18 +671,24 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
       if (out->sclass == REGISTER &&
           (isint(out->type) || out->type == in->type)) {
         int outn = out->x.regnode->number;
-        print("\tmv x%d,x%d\n", outn, rn);
+        if(rs == FREG)        
+          print("\tfsgnj.s f%d,f%d,f%d\n", outn, rn, rn);           
+        else
+          print("\tmv x%d,x%d\n", outn, rn);        
       } else {
         int off = in->x.offset;
         int n = (in->type->size + 3) / 4;
         int i;
         for (i = rn; i < rn + n; i++) {
-          print("\tsw x%d,%d(x8)\n", i, framesize + off + (i - rn) * 4);
+            if(rs == FREG)
+                print("\tfsw f%d,%d(x8)\n", i, framesize + off + (i - rn) * 4);
+            else
+                print("\tsw x%d,%d(x8)\n", i, framesize + off + (i - rn) * 4);
         }
       }
     }
   }
-  if (variadic(f->type) && callee[i - 1] != NULL) {
+  if (varargs && callee[i - 1] != NULL) {
     i = callee[i - 1]->x.offset + callee[i - 1]->type->size;
 	for (i = roundup(i, 4)/4; i < 6; i++) {
       print("\tsw x%d,%d(x8)\n", i + 12, framesize + 4 * i);
@@ -643,6 +696,12 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
   }
   emitcode();
   saved = maxargoffset;
+  for (i = 0; i < 32; i++) {
+    if (usedmask[FREG] & (1 << i)) {
+      print("\tflw f%d,%d(x2)\n", i, saved);
+      saved += 4;
+    }
+  }
   for (i = 0; i < 32; i++) {
     if (usedmask[IREG] & (1 << i)) {
       print("\tlw x%d,%d(x2)\n", i, saved);
@@ -705,11 +764,11 @@ static void progbeg(int argc, char *argv[]) {
     ireg[i] = mkreg("%d", i, 1, IREG);
   }
   iregw = mkwildcard(ireg);
-  for (i = 0; i < 32; i += 2) {
-    freg2[i] = mkreg("%d", i, 3, FREG);
+  for (i = 0; i < 32; i++) {
+    freg[i] = mkreg("%d", i, 1, FREG);
   }
   ireg[2]->x.name = "x2";
-  freg2w = mkwildcard(freg2);
+  fregw = mkwildcard(freg);
   tmask[IREG] = INTTMP;
   vmask[IREG] = INTVAR;
   tmask[FREG] = FLTTMP;
@@ -770,11 +829,13 @@ static Symbol rmap(int opk) {
     case I:
     case U:
     case P:
-    case B:
+    case B: 
+     return iregw;
     case F:
-      return iregw;
-    //case F:
-    //  return freg2w;
+      if (hardfloat)
+      return fregw;
+      else
+      return iregw;      
     default:
       return 0;
   }
@@ -846,7 +907,12 @@ static void emit2(Node p) {
       q = argreg(p->x.argno, p->syms[2]->u.c.v.i, ty, sz, ty0);
       src = getregnum(p->x.kids[0]);
       if (q == NULL) {
-        print("\tsw x%d,%d(x2)\n", src, p->syms[2]->u.c.v.i);
+        if(ty==F && hardfloat)
+            print("\tfsw f%d,%d(x2)\n", src, p->syms[2]->u.c.v.i);           
+        else
+            print("\tsw x%d,%d(x2)\n", src, p->syms[2]->u.c.v.i);
+      } else {
+        if(ty==F && hardfloat) print("\tfmv.x.s x%d,f%d\n", src, src);
       }
       break;
     case ASGN+B:
@@ -855,7 +921,7 @@ static void emit2(Node p) {
       blkcopy(getregnum(p->x.kids[0]), 0,
               getregnum(p->x.kids[1]), 0,
               p->syms[0]->u.c.v.i, tmpregs);
-      break;
+      break;    
   }
 }
 
@@ -892,15 +958,25 @@ static void target(Node p) {
     case MUL + F:
     case ADD + F:
     case SUB + F:
+    case EQ + F:
+    case NE + F:
+    case LE + F:
+    case LT + F:
+    case GT + F:
+    case GE + F:
+      if (!hardfloat) {
       setreg (p, ireg[10]);
       rtarget (p, 0, ireg[12]);
       rtarget (p, 1, ireg[13]);
+      }
       break;
     case NEG + F:
     case CVI + F:
     case CVF + I:
+      if (!hardfloat) {
       setreg (p, ireg[10]);
       rtarget (p, 0, ireg[12]);
+      }
       break;
     case CNST+I:
     case CNST+P:
@@ -912,27 +988,31 @@ static void target(Node p) {
       break;
     case CALL+I:
     case CALL+P:
-    case CALL+U:
-    case CALL+F:
+    case CALL+U:    
       rtarget(p, 0, ireg[31]);
       setreg(p, ireg[10]);
       break;
-    //case CALL+F:
-    //  rtarget(p, 0, ireg[31]);
-    //  setreg(p, freg2[0]);
-    //  break;
+    case CALL+F:
+      rtarget(p, 0, ireg[31]);
+      if(hardfloat)
+        setreg(p, freg[10]);
+      else 
+        setreg(p, ireg[10]);
+      break;
     case CALL+V:
       rtarget(p, 0, ireg[31]);
       break;
     case RET+I:
     case RET+P:
-    case RET+U:
-    case RET+F:
+    case RET+U:    
       rtarget(p, 0, ireg[10]);
       break;
-    //case RET+F:
-    //  rtarget(p, 0, freg2[0]);
-    //  break;
+    case RET+F:
+        if(hardfloat)
+          rtarget(p, 0, freg[10]);
+        else
+          rtarget(p, 0, ireg[10]);
+      break;
     case ARG+I:
     case ARG+P:
     case ARG+U:
@@ -959,28 +1039,36 @@ static void target(Node p) {
 static void clobber(Node p) {
   assert(p);
   switch (specific(p->op)) {
-    //case CALL+F:
-    //  spill(INTTMP | INTRET, IREG, p);
-    // spill(FLTTMP, FREG, p);
-    //  break;
+    case CALL+F:
+      if (hardfloat) spill(FLTTMP, FREG, p);
+      else spill(INTTMP, IREG, p);      
+     break;
     case CALL+I:
     case CALL+P:
     case CALL+U:
-    case CALL+F:
+      spill(INTTMP, IREG, p);
+      if (hardfloat) spill(FLTTMP | FLTRET, FREG, p);
+      break;         
     case ADD+F:
     case SUB+F:
     case NEG+F:
     case DIV+F:
     case MOD+F:
     case MUL+F:
+    case EQ+F:
+    case NE+F:
+    case LE+F:
+    case LT+F:
+    case GT+F:
+    case GE+F:
     case CVI+F:
     case CVF+I:
-      spill(INTTMP, IREG, p);
-      //spill(FLTTMP | FLTRET, FREG, p);
-      break;
+      if(hardfloat) break;
+      spill(INTTMP, IREG, p);      
+      break;      
     case CALL+V:
       spill(INTTMP | INTRET, IREG, p);
-      //spill(FLTTMP | FLTRET, FREG, p);
+      if (hardfloat) spill(FLTTMP | FLTRET, FREG, p);
       break;
   }
 }

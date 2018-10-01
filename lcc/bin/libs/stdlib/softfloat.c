@@ -1011,7 +1011,22 @@ flag float32_lt_quiet( float32 a, float32 b )
 
 
 
-int float32_neg (int a)
+float32 float32_neg (int32 a)
 {
-  return a == 0 ? 0 : (a ^ 0x80000000);
+  return (bits32) a == 0 ? 0 : (a ^ 0x80000000);
+}
+
+flag float32_gt( float32 a, float32 b )
+{
+  return(!float32_le(a,b));
+}
+
+flag float32_ge( float32 a, float32 b )
+{
+  return(!float32_lt(a,b));
+}
+
+flag float32_ne( float32 a, float32 b )
+{
+  return(!float32_eq(a,b));
 }
