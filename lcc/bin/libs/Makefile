@@ -3,7 +3,7 @@
 #
 
 
-DIRS =ctype eeprintf errno io math softfloat stdio stdlib string
+DIRS =ctype eeprintf errno io math softfloat libsoftfloat stdio stdlib string
 
 .PHONY:		all install clean
 

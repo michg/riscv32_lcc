@@ -1231,7 +1231,7 @@ void dotStabs(unsigned int code) {
   str2int(ptr, &i);
   sprintf(label->name+strlen(label->name),"%d",i); 
   if(label->debug==DBG_VARLOCSTACK || label->debug==DBG_VARLOCREG) {
-    sprintf(label->name+strlen(label->name), " @ 0x%08X\n", label->debugvalue);
+    sprintf(label->name+strlen(label->name), " @ 0x%08X", label->debugvalue);
   }
  }
 }

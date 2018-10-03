@@ -192,8 +192,8 @@ void showSymdefs(char *symdefs) {
       printf("cannot read symdef file\n");
       exit(1);
     }
-    printf("%4d: name = 0x%08X, position = 0x%08lX, string = '",
-           i, e.name, e.position);
+    //printf("%4d: name = 0x%08X, position = 0x%08lX, string = '",
+    //       i, e.name, e.position);
     curPos = ftell(in);
     pos = sizeof(int) + numSymbols * sizeof(Entry) + e.name;
     fseek(in, pos, SEEK_SET);
@@ -206,9 +206,9 @@ void showSymdefs(char *symdefs) {
       if (c == 0) {
         break;
       }
-      printf("%c", c);
+      //printf("%c", c);
     }
-    printf("'\n");
+    //printf("'\n");
     fseek(in, curPos, SEEK_SET);
   }
   fclose(in);

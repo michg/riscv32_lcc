@@ -18,6 +18,7 @@
 
 #include "set.h"
 #include "atom.h"
+#include "list.h"
 #include "mem.h"
 
 
@@ -276,6 +277,7 @@ Lelem *dlist = NULL;
 Set_T undefset;
 Set_T defset;
 Set_T rvcset;
+List_T liblist;
 void **rvcarray;
 
 
@@ -888,7 +890,7 @@ void readModule(void) {
 
 
 void printSymbol(Symbol *s) {
-  fprintf(mapFile, "%-32s", s->name);
+  fprintf(mapFile, "%-64s", s->name);
   if (s->type & MSB) {
     /* symbol is undefined */
     fprintf(mapFile, "%-15s", "UNDEFINED");
@@ -946,9 +948,9 @@ void printdebSymbol(Symbol *s) {
                    break;
     case DBG_VARGLO: fprintf(debFile, "global: %s @ 0x%08X\n", s->name, s->value+segStart[s->type]);
                      break;
-    case DBG_VARLOCSTACK: fprintf(debFile, "%s", s->name);      //local or locparam
+    case DBG_VARLOCSTACK: fprintf(debFile, "%s\n", s->name);      //local or locparam
                           break;
-    case DBG_VARLOCREG: fprintf(debFile, "%s", s->name); // reglocal or regparam
+    case DBG_VARLOCREG: fprintf(debFile, "%s\n", s->name); // reglocal or regparam
                         break;
     case DBG_TYPEDEF: fprintf(debFile, "%s\n", s->name); // typedef
                       break;
@@ -1188,9 +1190,10 @@ int main(int argc, char *argv[]) {
   rvcset =  Set_new(0, intcmp, inthash); 
   tmpnam(codeName);
   tmpnam(dataName);
-  outName = "a.out";
+  char *outName = "a.out";
   struct stat buf;
-
+  
+  
   for (i = 1; i < argc; i++) {
     argp = argv[i];
     if (*argp != '-') {
@@ -1208,13 +1211,14 @@ int main(int argc, char *argv[]) {
         if (i == argc - 1) {
           usage(argv[0]);
         }
-        outName = argv[++i];
+        outName = argv[++i];        
         break;
 	  case 'l':
         if (i == argc - 1) {
           usage(argv[0]);
         }
-        libName = argv[++i];
+        libName = strdup(argv[++i]);        
+        liblist = List_push(liblist,libName);        
         break;
       case 'm':
         if (i == argc - 1) {
@@ -1270,14 +1274,14 @@ int main(int argc, char *argv[]) {
   outFile = fopen(outName, "wb");
   if (outFile == NULL) {
     error("cannot open output file '%s'", outName);
-  }
-  tmp = dirname(outName);
+  }  
+  tmp = dirname(strdup(outName));  
   strcpy(outpath, tmp);
-  strcat(outpath,"/");  
+  strcat(outpath,"/");    
   if(withDebug) {
-    strcpy(debName,outName);
-    dot = strrchr(debName, '.');
-    strcpy(dot, ".deb");
+    strcpy(debName,outName);    
+    dot = strrchr(debName, '.');    
+    strcpy(dot, ".deb");    
     debFile = fopen(debName, "wt");
     if (debFile == NULL) {
       error("cannot open debug file '%s'", debName);
@@ -1306,14 +1310,17 @@ int main(int argc, char *argv[]) {
     }
   } while (++i < argc);
 
-  void **lines = Set_toArray(defset, NULL);
   
-  for (i = 0; lines[i]; i++)   
-	  Set_remove(undefset, Atom_string(lines[i])); 	   
-  free(lines);  
-  lines = Set_toArray(undefset, NULL); 
-  
-  if(libName) {
+   
+  liblist = List_push(liblist, NULL);
+  liblist = List_reverse(liblist);
+  liblist = List_pop(liblist, (void **)&libName);  
+  while(libName) {
+      printf("Using Library:%s\r\n",libName);
+      void **lines = Set_toArray(defset, NULL);
+      for (i = 0; lines[i]; i++) Set_remove(undefset, Atom_string(lines[i])); 	   
+      free(lines);  
+      lines = Set_toArray(undefset, NULL);
       readlibsymbols(libName);      
       printf("Resolving:\r\n");      
 	  for (i = 0; lines[i]; i++) {	  
@@ -1342,6 +1349,7 @@ int main(int argc, char *argv[]) {
           }
       }	  
 	  FREE(lines);
+  liblist = List_pop(liblist, (void **)&libName);
   }
   fprintf(stderr, "Linking modules...\n");
   linkSymbols();
