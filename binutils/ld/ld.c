@@ -24,7 +24,7 @@
 
 /**************************************************************/
 
-
+#define roundup(x,n) (((x)+((n)-1))&(~((n)-1))) 
 #define MAX_STRLEN	400
 
 #define PAGE_SHIFT	12
@@ -34,6 +34,7 @@
 
 #define MSB	((unsigned int) 1 << (sizeof(unsigned int) * 8 - 1))
 #define SEGALIGN 4
+#define FUNCALIGN 16
 
 #define DBG_LINE 1
 #define DBG_FUNC 2
@@ -934,17 +935,12 @@ void printliststring(Lelem* x) {
     printf("%s\r\n",(char *) x->valptr);
 }
 
-void printdebSymbol(Symbol *s) {
-  Symbol *refsym;
-  char *refname, *tmp;  
+void printdebSymbol(Symbol *s) {  
   switch (s->debug) {
     /* debug symbol */
     case DBG_LINE: fprintf(debFile, "line: %s @ 0x%08X\n", s->name, s->value+segStart[s->type]);
-                   break;
-    case DBG_FUNC: tmp = strdup(s->name);
-                   refname = strtok(tmp, " ");
-                   refsym = lookupEnter(&symbolTable, refname, NULL, 0);    
-                   fprintf(debFile, "function: %s @ 0x%08X\n", refsym->name, refsym->value+segStart[refsym->type]);
+                   break;    
+    case DBG_FUNC:fprintf(debFile, "function: %s @ 0x%08X\n", s->name, roundup(s->value+segStart[s->type], FUNCALIGN));
                    break;
     case DBG_VARGLO: fprintf(debFile, "global: %s @ 0x%08X\n", s->name, s->value+segStart[s->type]);
                      break;
@@ -1110,7 +1106,8 @@ int readlibsymbols(char * libname) {
   for (i = 0; i < numSymbols; i++) {  
    getdelim(&symnameptr, &n, ':', libfile);
    symnameptr[strlen(symnameptr)-1] = '\0';
-   getdelim(&filenameptr, &n, '\0', libfile);   
+   getdelim(&filenameptr, &n, ',', libfile);   
+   filenameptr[strlen(filenameptr)-1] = '\0';
    lookupEnter(&libsymbolTable, symnameptr, filenameptr, 0);
   }
   fclose(libfile);

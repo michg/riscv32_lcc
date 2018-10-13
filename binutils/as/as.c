@@ -1188,7 +1188,7 @@ void dotStabs(unsigned int code) {
             label->debug = DBG_VARGLO;
             ptr+=2;
             label->debugvalue = 0;
-            break;
+            break; 
   case 'f':
   case 'F': n=sprintf(debuglabel,"%s ",name);
             strcpy(funcname,name);
@@ -1198,7 +1198,7 @@ void dotStabs(unsigned int code) {
             label->value = segPtr[currSeg];            
             label->debug = DBG_FUNC;
             ptr+=2;
-            break;
+            break;  
   case 'P':
   case 'r': if(ch=='P') n = sprintf(debuglabel,"regparam: ");
             else n = sprintf(debuglabel, "reglocal: ");
@@ -1730,7 +1730,7 @@ void formatS(unsigned int code) {
 }
 
 void formatSF(unsigned int code) {
-  int src1, src2, vcon;
+  int src1, src2;
   Value v;
   unsigned int immed;
   
@@ -1743,8 +1743,7 @@ void formatSF(unsigned int code) {
   getToken();
   v = parseExpression();
   if (v.sym == NULL) {
-    immed = v.con;
-    vcon = v.con;
+    immed = v.con;    
     expect(TOK_LPAREN);
     getToken();
     expect(TOK_IREGISTER);
@@ -1950,7 +1949,7 @@ void formatLIm(unsigned int code) {
 }
 
 void formatLFIm(unsigned int code) {
-  int dst, src1, vcon;
+  int dst, src1;
   Value v;
   unsigned int immed;
 
@@ -1962,8 +1961,7 @@ void formatLFIm(unsigned int code) {
   getToken();
   v = parseExpression();
   if (v.sym == NULL) {
-    immed = v.con;
-    vcon = v.con;
+    immed = v.con;    
     expect(TOK_LPAREN);
     getToken();
     expect(TOK_IREGISTER);

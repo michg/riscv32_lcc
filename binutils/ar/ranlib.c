@@ -10,18 +10,12 @@
 #include <time.h>
 #include <fcntl.h>
 
-#include "ranlib.h"
 #include "../include/ar.h"
 #include "../include/a.out.h"
+#include "../include/ranlib.h"
 
-
-//#define TEMP_NAME		"__.SYMDEF"
-
-#define STRING_SIZE_INIT	1024
-#define STRING_SIZE_GROW	2
 
 #define MAX_SYM_ENTRIES		1000
-
 #define MSB	((unsigned int) 1 << (sizeof(unsigned int) * 8 - 1))
 
 
@@ -40,57 +34,13 @@ long curOff;
 
 Entry table[MAX_SYM_ENTRIES];
 int numEntries;
-
-int createIndex;
 char firstName[MAX_NAME];
-
+char *stringArea = NULL;
+unsigned int arMagic;
 ArHeader arhdr;
 ExecHeader exhdr;
 
-char symfilenam[MAX_NAME];
-
-
 /**************************************************************/
-
-
-char *stringArea = NULL;
-unsigned int sizeAllocated = 0;
-unsigned int sizeUsed = 0;
-
-
-unsigned int getStringPos(void) {
-  return sizeUsed;
-}
-
-
-void storeCharacter(char c) {
-  unsigned int newSize;
-  char *newArea;
-
-  if (sizeUsed + 1 > sizeAllocated) {
-    if (sizeAllocated == 0) {
-      newSize = STRING_SIZE_INIT;
-    } else {
-      newSize = STRING_SIZE_GROW * sizeAllocated;
-    }
-    newArea = malloc(newSize);
-    if (newArea == NULL) {
-      fprintf(stderr, "ar: cannot allocate string area\n");
-      exit(1);
-    }
-    if (stringArea != NULL) {
-      memcpy(newArea, stringArea, sizeUsed);
-      free(stringArea);
-    }
-    stringArea = newArea;
-    sizeAllocated = newSize;
-  }
-  stringArea[sizeUsed++] = c;
-}
-
-
-/**************************************************************/
-
 
 int nextMember(void) {
   int pad;
@@ -107,62 +57,26 @@ int nextMember(void) {
 }
 
 
-void addSymbol(unsigned int nameOffset,char* filename) {
-  long curPos;
-  int c;
+void addSymbol(char* symbolname,char* filename) {
+  int len;
+  static unsigned int stringsize=0;
 
   if (numEntries >= MAX_SYM_ENTRIES) {
     fprintf(stderr, "ar: symbol table overflow\n");
     exit(1);
   }
-  table[numEntries].name = getStringPos();
+  table[numEntries].name = stringsize;
   table[numEntries].position = curOff;
   numEntries++;
-  curPos = ftell(fi);
-  fseek(fi, curOff + sizeof(arhdr) + nameOffset, SEEK_SET);
-  //do {
-  //  c = fgetc(fi);
-  //  storeCharacter(c);
-  //} while (c != 0) ;
-  c = fgetc(fi);
-  while (c != 0) {
-    storeCharacter(c);
-    c = fgetc(fi);
+  len = strlen(symbolname) + strlen(filename) + 2;
+  stringArea = realloc(stringArea, stringsize + len + 1);  
+  if(!stringArea) {
+      printf("Realloc failed!\n");
+      exit(1);
   }
-  storeCharacter(58); // :
-  do {
-    c = *filename;
-    filename++;
-    storeCharacter(c);
-  } while (c != 0) ;
-  fseek(fi, curPos, SEEK_SET);
+  stringsize += sprintf(stringArea + stringsize, "%s:%s,", symbolname, filename);  
 }
 
-
-void fixSize(void) {
-  long deltaOff;
-  int pad;
-  int i;
-
-  deltaOff = sizeof(arhdr) + sizeof(int) +
-             numEntries * sizeof(Entry) + getStringPos();
-  pad = -deltaOff & 0x03;
-  deltaOff += pad;
-  nxtOff = sizeof(unsigned int);
-  nextMember();
-  if(strncmp(arhdr.name, TEMP_NAME, MAX_NAME) == 0) {
-    /* there is an index already present */
-    createIndex = 0;
-    deltaOff -= sizeof(arhdr) + arhdr.size;
-  } else {
-    /* no index yet present, create new one */
-    createIndex = 1;
-    strncpy(firstName, arhdr.name, MAX_NAME);
-  }
-  for (i = 0; i < numEntries; i++) {
-    table[i].position += deltaOff;
-  }
-}
 
 
 /**************************************************************/
@@ -171,11 +85,12 @@ void fixSize(void) {
 void showSymdefs(char *symdefs) {
   FILE *in;
   int numSymbols;
-  int i;
-  Entry e;
-  long curPos;
-  long pos;
-  int c;
+  int i, pos;
+  unsigned int n = 40;
+  char symname[40], filename[40];
+  char* symnameptr = &symname[0];
+  char* filenameptr = &filename[0];  
+  
 
   in = fopen(symdefs, "r");
   if (in == NULL) {
@@ -187,88 +102,23 @@ void showSymdefs(char *symdefs) {
     exit(1);
   }
   printf("%d symbols\n", numSymbols);
-  for (i = 0; i < numSymbols; i++) {
-    if (fread(&e, sizeof(e), 1, in) != 1) {
-      printf("cannot read symdef file\n");
-      exit(1);
-    }
-    //printf("%4d: name = 0x%08X, position = 0x%08lX, string = '",
-    //       i, e.name, e.position);
-    curPos = ftell(in);
-    pos = sizeof(int) + numSymbols * sizeof(Entry) + e.name;
-    fseek(in, pos, SEEK_SET);
-    while (1) {
-      c = fgetc(in);
-      if (c == EOF) {
-        printf("\nerror: unexpected end of file\n");
-        exit(1);
-      }
-      if (c == 0) {
-        break;
-      }
-      //printf("%c", c);
-    }
-    //printf("'\n");
-    fseek(in, curPos, SEEK_SET);
-  }
-  fclose(in);
-}
-
-char* getfileSymdefs(char* symdefs, char* symbol) {
-  FILE *in;
-  int numSymbols;
-  int i,j;
-  int len,res;
-  long pos;
-  char* ptr;
-  int c;
-  char symtab[MAX_SYM_ENTRIES][80];
-
-  in = fopen(symdefs, "r");
-  if (in == NULL) {
-    printf("error: cannot open symdef file '%s'\n", symdefs);
-    exit(1);
-  }
-  if (fread(&numSymbols, sizeof(int), 1, in) != 1) {
-    printf("cannot read symdef file\n");
-    exit(1);
-  }
-  //printf("%d symbols\n", numSymbols);
   pos = sizeof(int) + numSymbols * sizeof(Entry);
   fseek(in, pos, SEEK_SET);
-  for (i = 0; i < numSymbols; i++) {
-   j=0;
-   do {
-     c = fgetc(in);
-     symtab[i][j] = c;
-     j++;
-   } while (c != 0) ;
-   //fgets(&symtab[i][0], 80, in);
-   //printf("%s\n",&symtab[i][0]);
-  }
+  for (i = 0; i < numSymbols; i++) {  
+   getdelim(&symnameptr, &n, ':', in);
+   symnameptr[strlen(symnameptr)-1] = '\0';
+   getdelim(&filenameptr, &n, ',', in);   
+   filenameptr[strlen(filenameptr)-1] = '\0';
+   printf("Symbol:%s,%s\n",symnameptr,filenameptr);
+  } 
   fclose(in);
-  i = 0;
-  do {
-   ptr = strchr(&symtab[i][0],':');
-   len = (int)(ptr - &symtab[i][0]);
-   res = strncmp(&symtab[i][0],symbol,len);
-   i++;
-  } while(res!=0 && i<=numSymbols);
-  if(i==(numSymbols+1)) {
-    printf("symbol not found in library\n");
-    exit(1);
-  }
-  ptr++;
-  strcpy(symfilenam,ptr);
-  //printf("%s",symfilenam);
-  return(symfilenam);
-
 }
+
+
 /**************************************************************/
 
 
 int hasSymbols(char *archive) {
-  unsigned int arMagic;
   int res;
 
   fi = fopen(archive, "r");
@@ -292,14 +142,17 @@ int hasSymbols(char *archive) {
 }
 
 
-int updateSymbols(char *archive, int verbose) {
-  unsigned int arMagic;
+int updateSymbols(char *archive, int verbose) {  
   unsigned int skip;
   int numSymbols;
   unsigned int stringStart;
   SymbolRecord symbol;
-  char *args[3];
+  unsigned int n = 40;
+  char symbolname[40];
+  char* symbolnameptr = &symbolname[0];  
+  char *nameptr;  
   int res;
+  long curPos;
 
   if (verbose) {
     printf("ar: updating symbols in %s\n", archive);
@@ -347,12 +200,18 @@ int updateSymbols(char *archive, int verbose) {
       }
       if ((symbol.type & MSB) == 0) {
         /* this is an exported symbol */
-        addSymbol(stringStart + symbol.name,arhdr.name);
+        curPos = ftell(fi);
+        fseek(fi, curOff + sizeof(arhdr) + stringStart + symbol.name, SEEK_SET);
+        getdelim(&symbolnameptr, &n, '\0', fi);
+        fseek(fi, curPos, SEEK_SET);
+        addSymbol(symbolname, arhdr.name);         
       }
     }
-  } while (nextMember() != 0) ;
-  fixSize();
-  fclose(fi);
+  } while (nextMember() != 0) ;  
+  nxtOff = sizeof(unsigned int);
+  nextMember();  
+  strncpy(firstName, arhdr.name, MAX_NAME);
+  fclose(fi); 
   fo = fopen(TEMP_NAME, "w");
   if (fo == NULL) {
     fprintf(stderr, "ar: can't create temporary file\n");
@@ -370,29 +229,20 @@ int updateSymbols(char *archive, int verbose) {
     unlink(TEMP_NAME);
     return 1;
   }
-  if (fwrite(stringArea, 1, getStringPos(), fo) != getStringPos()) {
+  if (fwrite(stringArea, strlen(stringArea), 1, fo) != 1) {
     fprintf(stderr, "ar: can't write temporary file\n");
     fclose(fo);
     unlink(TEMP_NAME);
     return 1;
   }
   fclose(fo);
+  
   if (verbose) {
     showSymdefs(TEMP_NAME);
   }
-  if (createIndex) {
-    /* ar -rlb firstName archive TEMP_NAME */
-    args[0] = firstName;
-    args[1] = archive;
-    args[2] = TEMP_NAME;
-    res = exec_rCmd(1, args);
-  } else {
-    /* ar -rl archive TEMP_NAME */
-    args[0] = archive;
-    args[1] = TEMP_NAME;
-    args[2] = NULL;
-    res = exec_rCmd(0, args);
-  }
-  //unlink(TEMP_NAME);
+  /* ar -rlb firstName archive TEMP_NAME */      
+    nameptr = TEMP_NAME;    
+    rCmd(firstName, archive, &nameptr, 1, 0, 1, 0);    
+    res = notFound(1, &nameptr);
   return res;
 }

@@ -11,8 +11,9 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <time.h>
+#include <libgen.h>
 
-#include "ranlib.h"
+#include "../include/ranlib.h"
 #include "../include/ar.h"
 
 
@@ -28,11 +29,9 @@
 
 
 char *com = "drqtpmx";
-char *opt = "vuabcls";
+char *opt = "vuabs";
 char *symfilenam =  TEMP_NAME;
 
-
-int signums[] = { SIGHUP, SIGINT, SIGQUIT, 0 };
 
 void (*comfun)(void);
 int flg[26];
@@ -47,120 +46,33 @@ int baState;
 char *posName;
 
 char tmp0nam[20];
-char tmp1nam[20];
-char tmp2nam[20];
 char *tf0nam;
+char tmp1nam[20];
 char *tf1nam;
-char *tf2nam;
-int tf0;
-int tf1;
-int tf2;
+
+int tf0 = 0;
+int tf1 = 0;
+
 int qf;
 
 char *file;
 char name[MAX_NAME];
 
 struct stat stbuf;
-ArHeader arbuf;
+ArHeader arhead;
 unsigned char buf[BUFSIZE];
 
 
 /**************************************************************/
 
 
-#define IFMT	070000
-#define SUID	004000
-#define SGID	002000
-#define STXT	001000
-#define ROWN	000400
-#define WOWN	000200
-#define XOWN	000100
-#define RGRP	000040
-#define WGRP	000020
-#define XGRP	000010
-#define ROTH	000004
-#define WOTH	000002
-#define XOTH	000001
-
-
-int m1[] = { 1, ROWN, 'r', '-' };
-int m2[] = { 1, WOWN, 'w', '-' };
-int m3[] = { 2, SUID, 's', XOWN, 'x', '-' };
-int m4[] = { 1, RGRP, 'r', '-' };
-int m5[] = { 1, WGRP, 'w', '-' };
-int m6[] = { 2, SGID, 's', XGRP, 'x', '-' };
-int m7[] = { 1, ROTH, 'r', '-' };
-int m8[] = { 1, WOTH, 'w', '-' };
-int m9[] = { 2, STXT, 't', XOTH, 'x', '-' };
-
-int *m[] = { m1, m2, m3, m4, m5, m6, m7, m8, m9 };
-
-
-void selectChar(int *pairp) {
-  int *ap;
-  int n;
-
-  ap = pairp;
-  n = *ap++;
-  while (--n >= 0 && (arbuf.mode & *ap++) == 0) {
-    ap++;
-  }
-  putchar(*ap);
-}
-
-
-void printMode(void) {
-  int **mp;
-
-  for (mp = &m[0]; mp < &m[9]; mp++) {
-    selectChar(*mp);
-  }
-}
-
-
-void showAttributes(void) {
-  char *cp;
-
-  printMode();
-  printf("%4d/%4d", arbuf.uid, arbuf.gid);
-  printf("%8d", arbuf.size);
-  cp = ctime(&arbuf.date);
-  printf(" %-12.12s %-4.4s ", cp + 4, cp + 20);
-}
-
-
-/**************************************************************/
-
-
-void mesg(int c) {
+void mesg(int c, char *filename) {
   if (flg['v' - 'a']) {
-    printf("%c - %s\n", c, file);
+    printf("%c - %s\n", c, filename);
   }
 }
 
-
-char *trim(char *s) {
-  char *p1;
-  char *p2;
-
-  for (p1 = s; *p1 != '\0'; p1++) ;
-  while (p1 > s) {
-    if (*--p1 != '/') {
-      break;
-    }
-    *p1 = '\0';
-  }
-  p2 = s;
-  for (p1 = s; *p1 != '\0'; p1++) {
-    if (*p1 == '/') {
-      p2 = p1 + 1;
-    }
-  }
-  return p2;
-}
-
-
-int notFound(void) {
+int notFound(int namc, char **namv) {
   int n;
   int i;
 
@@ -175,7 +87,7 @@ int notFound(void) {
 }
 
 
-int moreFiles(void) {
+int moreFiles(int namc, char **namv) {
   int n;
   int i;
 
@@ -190,15 +102,16 @@ int moreFiles(void) {
 
 
 void unlinkTempFiles(void) {
-  if (tf0nam != NULL) {
-    unlink(tf0nam);
+int errcode;
+  if (strcmp(tmp0nam,"v0XXXXXX")) {
+    close(tf0);   
+    errcode = unlink(tmp0nam);     
   }
-  if (tf1nam != NULL) {
-    unlink(tf1nam);
-  }
-  if (tf2nam != NULL) {
-    unlink(tf2nam);
-  }
+  if (strcmp(tmp1nam,"v1XXXXXX")) {
+    close(tf1);    
+    errcode = unlink(tmp1nam);    
+  } 
+  
 }
 
 
@@ -207,10 +120,6 @@ void done(int c) {
   exit(c);
 }
 
-
-void sigDone(int signum) {
-  done(100);
-}
 
 
 void noArchive(void) {
@@ -225,19 +134,16 @@ void writeError(void) {
 }
 
 
-void phaseError(void) {
-  fprintf(stderr, "ar: phase error on %s\n", file);
-}
 
 
-int stats(void) {
+int openstats(char *filename, struct stat* stbuf) {
   int f;
 
-  f = open(file, O_RDONLY);
+  f = open(filename, O_RDONLY);
   if (f < 0) {
     return f;
   }
-  if (fstat(f, &stbuf) < 0) {
+  if (fstat(f, stbuf) < 0) {
     close(f);
     return -1;
   }
@@ -245,16 +151,16 @@ int stats(void) {
 }
 
 
-int match(void) {
+int matchargs(char** ptr, int namc, char **namv) {
   int i;
 
   for (i = 0; i < namc; i++) {
     if (namv[i] == NULL) {
       continue;
-    }
-    if (strcmp(trim(namv[i]), file) == 0) {
-      file = namv[i];
-      namv[i] = NULL;
+    }    
+    if (strcmp(basename(strdup(namv[i])), *ptr) == 0) {
+      *ptr = namv[i];      
+      namv[i] = NULL;      
       return 1;
     }
   }
@@ -262,29 +168,26 @@ int match(void) {
 }
 
 
-void baMatch(void) {
+void baMatch(int* tf0, int* tf1, char* filename, char* posname, int aflag) {
   int f;
-
-  if (baState == 1) {
-    if (strcmp(file, posName) != 0) {
+  static int baState = 0;  
+  if (strcmp(filename, posname) != 0) {
       return;
-    }
-    baState = 2;
-    if (flg['a' - 'a']) {
-      return;
-    }
   }
+  baState = 2;
+  if (aflag) {
+     return;
+  }
+  
   if (baState == 2) {
-    baState = 0;
-    tf1nam = mktemp(tmp1nam);
-    close(creat(tf1nam, 0600));
-    f = open(tf1nam, O_RDWR);
+    baState = 0;    
+    f = mkstemp(tmp1nam);
     if (f < 0) {
       fprintf(stderr, "ar: cannot create second temp file\n");
       return;
     }
-    tf1 = tf0;
-    tf0 = f;
+    *tf1 = *tf0;
+    *tf0 = f;
   }
 }
 
@@ -292,31 +195,29 @@ void baMatch(void) {
 /**************************************************************/
 
 
-void init(void) {
+void init(int* tf0) {
   unsigned int mbuf;
 
-  mbuf = AR_MAGIC;
-  tf0nam = mktemp(tmp0nam);
-  close(creat(tf0nam, 0600));
-  tf0 = open(tf0nam, O_RDWR);
-  if (tf0 < 0) {
+  mbuf = AR_MAGIC;  
+  *tf0 = mkstemp(tmp0nam);
+  if (*tf0 < 0) {
     fprintf(stderr, "ar: cannot create temp file\n");
     done(1);
   }
-  if (write(tf0, &mbuf, sizeof(mbuf)) != sizeof(mbuf)) {
+  if (write(*tf0, &mbuf, sizeof(mbuf)) != sizeof(mbuf)) {
     writeError();
   }
 }
 
 
-int getArchive(void) {
+int getArchive(int *af, char *arnam) {
   unsigned int mbuf;
 
-  af = open(arnam, O_RDONLY);
-  if (af < 0) {
+  *af = open(arnam, O_RDONLY);
+  if (*af < 0) {
     return 1;
   }
-  if (read(af, &mbuf, sizeof(mbuf)) != sizeof(mbuf) ||
+  if (read(*af, &mbuf, sizeof(mbuf)) != sizeof(mbuf) ||
       mbuf != AR_MAGIC) {
     fprintf(stderr, "ar: %s not in archive format\n", arnam);
     done(1);
@@ -325,39 +226,13 @@ int getArchive(void) {
 }
 
 
-void getQuick(void) {
-  unsigned int mbuf;
 
-  qf = open(arnam, O_RDWR);
-  if (qf < 0) {
-    if (!flg['c' - 'a']) {
-      fprintf(stderr, "ar: creating %s\n", arnam);
-    }
-    close(creat(arnam, 0666));
-    qf = open(arnam, O_RDWR);
-    if (qf < 0) {
-      fprintf(stderr, "ar: cannot create %s\n", arnam);
-      done(1);
-    }
-    mbuf = AR_MAGIC;
-    if (write(qf, &mbuf, sizeof(mbuf)) != sizeof(mbuf)) {
-      writeError();
-    }
-  } else
-  if (read(qf, &mbuf, sizeof(mbuf)) != sizeof(mbuf) ||
-      mbuf != AR_MAGIC) {
-    fprintf(stderr, "ar: %s not in archive format\n", arnam);
-    done(1);
-  }
-}
-
-
-int getMember(void) {
+int getMember(char **filename, int af, ArHeader *arhead) {
   int i;
 
-  i = read(af, &arbuf, sizeof(arbuf));
-  if (i != sizeof(arbuf)) {
-    if (tf1nam != NULL) {
+  i = read(af, arhead, sizeof(ArHeader));
+  if (i != sizeof(ArHeader)) {
+    if (strcmp(tmp1nam,"v1XXXXXX")) {
       i = tf0;
       tf0 = tf1;
       tf1 = i;
@@ -365,28 +240,28 @@ int getMember(void) {
     return 1;
   }
   for (i = 0; i < MAX_NAME; i++) {
-    name[i] = arbuf.name[i];
+    name[i] = arhead->name[i];
   }
-  file = name;
+  *filename = name;
   return 0;
 }
 
 
-void copyFile(int fi, int fo, int flags) {
+void copyFile(int fi, int fo, int flags, ArHeader arhead) {
   int pe;
   int icount, ocount;
   int pad;
 
   if (flags & HEAD) {
-    if (write(fo, &arbuf, sizeof(arbuf)) != sizeof(arbuf)) {
+    if (write(fo, &arhead, sizeof(arhead)) != sizeof(arhead)) {
       writeError();
     }
   }
   pe = 0;
-  while (arbuf.size > 0) {
+  while (arhead.size > 0) {
     icount = ocount = BUFSIZE;
-    if (arbuf.size < icount) {
-      icount = ocount = arbuf.size;
+    if (arhead.size < icount) {
+      icount = ocount = arhead.size;
       pad = -icount & 0x03;
       if (flags & IODD) {
         icount += pad;
@@ -403,71 +278,54 @@ void copyFile(int fi, int fo, int flags) {
         writeError();
       }
     }
-    arbuf.size -= BUFSIZE;
+    arhead.size -= BUFSIZE;
   }
-  if (pe != 0) {
-    phaseError();
-  }
+  if (pe != 0) fprintf(stderr, "ar: phase error on %s\n", file);  
 }
 
 
-void moveFile(int f) {
+void moveFile(int f, int tf0, char* file, struct stat *stbuf) {
   char *cp;
   int i;
-
-  cp = trim(file);
+  ArHeader arhead;
+  
+  cp = basename(strdup(file));
   for (i = 0; i < MAX_NAME; i++) {
-    if ((arbuf.name[i] = *cp) != '\0') {
+    if ((arhead.name[i] = *cp) != '\0') {
       cp++;
     }
   }
-  arbuf.size = stbuf.st_size;
-  arbuf.date = stbuf.st_mtime;
-  arbuf.uid = stbuf.st_uid;
-  arbuf.gid = stbuf.st_gid;
-  arbuf.mode = stbuf.st_mode;
-  copyFile(f, tf0, OODD | HEAD);
+  arhead.size = stbuf->st_size;
+  arhead.date = stbuf->st_mtime;
+  arhead.uid = stbuf->st_uid;
+  arhead.gid = stbuf->st_gid;
+  arhead.mode = stbuf->st_mode;
+  copyFile(f, tf0, OODD | HEAD, arhead);
   close(f);
 }
 
 
-void install(void) {
-  int i;
-
-  for (i = 0; signums[i] != 0; i++) {
-    signal(signums[i], SIG_IGN);
-  }
-  if (af < 0) {
-    if (!flg['c' - 'a']) {
-      fprintf(stderr, "ar: creating %s\n", arnam);
-    }
-  }
-  close(af);
-  af = creat(arnam, 0666);
-  if (af < 0) {
+void install(int tf0, int tf1, char *arnam, int* af) {
+  int i;    
+  close(*af);
+  *af = creat(arnam, 0666);
+  if (*af < 0) {
     fprintf(stderr, "ar: cannot create %s\n", arnam);
     done(1);
   }
-  if (tf0nam != NULL) {
+  if (strcmp(tmp0nam,"v0XXXXXX")) {
     lseek(tf0, 0, SEEK_SET);
     while ((i = read(tf0, buf, BUFSIZE)) > 0) {
-      if (write(af, buf, i) != i) {
+      if (write(*af, buf, i) != i) {
         writeError();
       }
     }
   }
-  if (tf2nam != NULL) {
-    lseek(tf2, 0, SEEK_SET);
-    while ((i = read(tf2, buf, BUFSIZE)) > 0) {
-      if (write(af, buf, i) != i) {
-        writeError();
-      }
-    }
-  }
-  if (tf1nam != NULL) {
+  
+  if (strcmp(tmp1nam,"v1XXXXXX")) {
     lseek(tf1, 0, SEEK_SET);
     while ((i = read(tf1, buf, BUFSIZE)) > 0) {
-      if (write(af, buf, i) != i) {
+      if (write(*af, buf, i) != i) {
         writeError();
       }
     }
@@ -475,7 +333,7 @@ void install(void) {
 }
 
 
-void cleanup(void) {
+void moveargfiles(int tf0,  int namc, char **namv) {
   int i;
   int f;
 
@@ -485,13 +343,13 @@ void cleanup(void) {
       continue;
     }
     namv[i] = NULL;
-    mesg('a');
-    f = stats();
+    mesg('a', file);
+    f = openstats(file, &stbuf);
     if (f < 0) {
       fprintf(stderr, "ar: cannot open %s\n", file);
       continue;
     }
-    moveFile(f);
+    moveFile(f, tf0, file, &stbuf);
   }
 }
 
@@ -500,328 +358,139 @@ void cleanup(void) {
 
 
 void dCmd(void) {
-  init();
-  if (getArchive()) {
+  init(&tf0);
+  if (getArchive(&af, arnam)) {
     noArchive();
   }
-  while (!getMember()) {
-    if (match()) {
-      mesg('d');
-      copyFile(af, -1, IODD | SKIP);
+  while (!getMember(&file, af, &arhead)) {
+    if (matchargs(&file, namc, namv)) {
+      mesg('d', file);
+      copyFile(af, -1, IODD | SKIP, arhead);
       continue;
     }
-    mesg('c');
-    copyFile(af, tf0, IODD | OODD | HEAD);
+    mesg('c', file);
+    copyFile(af, tf0, IODD | OODD | HEAD, arhead);
   }
-  install();
+  install(tf0, tf1, arnam, &af);
 }
 
 
-void rCmd(void) {
+void rCmd(char *posName, char* arnam, char **namv, int namc, int aflag, int bflag, int uflag) {
   int f;
 
-  init();
-  getArchive();
-  while (!getMember()) {
-    baMatch();
-    if (namc == 0 || match()) {
-      f = stats();
+  init(&tf0);
+  getArchive(&af, arnam);
+  while (!getMember(&file, af, &arhead)) {
+    if (aflag || bflag) baMatch(&tf0, &tf1, file, posName, aflag);
+    if (namc == 0 || matchargs(&file, namc, namv)) {
+      f = openstats(file, &stbuf);
       if (f < 0) {
         if (namc != 0) {
           fprintf(stderr, "ar: cannot open %s\n", file);
         }
         goto cp;
       }
-      if (flg['u' - 'a']) {
-        if (stbuf.st_mtime <= arbuf.date) {
+      if (uflag) {
+        if (stbuf.st_mtime <= arhead.date) {
           close(f);
           goto cp;
         }
       }
-      mesg('r');
-      copyFile(af, -1, IODD | SKIP);
-      moveFile(f);
+      mesg('r', file);
+      copyFile(af, -1, IODD | SKIP, arhead);
+      moveFile(f, tf0, file, &stbuf);
       continue;
     }
 cp:
-    mesg('c');
-    copyFile(af, tf0, IODD | OODD | HEAD);
+    mesg('c', file);
+    copyFile(af, tf0, IODD | OODD | HEAD, arhead);
   }
-  cleanup();
-  install();
+  moveargfiles(tf0, namc, namv);
+  install(tf0, tf1, arnam, &af);
 }
 
-
-void qCmd(void) {
-  int i;
-  int f;
-
-  if (flg['a' - 'a'] || flg['b' - 'a']) {
-    fprintf(stderr, "ar: [ab] not allowed with -q\n");
-    done(1);
-  }
-  getQuick();
-  for (i = 0; signums[i] != 0; i++) {
-    signal(signums[i], SIG_IGN);
-  }
-  lseek(qf, 0, SEEK_END);
-  for (i = 0; i < namc; i++) {
-    file = namv[i];
-    if (file == NULL) {
-      continue;
-    }
-    namv[i] = NULL;
-    mesg('q');
-    f = stats();
-    if (f < 0) {
-      fprintf(stderr, "ar: cannot open %s\n", file);
-      continue;
-    }
-    tf0 = qf;
-    moveFile(f);
-    qf = tf0;
-  }
-}
 
 
 void tCmd(void) {
-  if (getArchive()) {
+  if (getArchive(&af, arnam)) {
     noArchive();
   }
-  while (!getMember()) {
-    if (namc == 0 || match()) {
-      if (flg['v' - 'a']) {
-        showAttributes();
-      }
-      printf("%s\n", trim(file));
+  while (!getMember(&file, af, &arhead)) {
+    if (namc == 0 || matchargs(&file, namc, namv)) {      
+      printf("%s\n", basename(strdup(file)));
     }
-    copyFile(af, -1, IODD | SKIP);
+    copyFile(af, -1, IODD | SKIP, arhead);
   }
 }
 
 
-void pCmd(void) {
-  if (getArchive()) {
-    noArchive();
-  }
-  while (!getMember()) {
-    if (namc == 0 || match()) {
-      if (flg['v' - 'a']) {
-        printf("\n<%s>\n\n", file);
-        fflush(stdout);
-      }
-      copyFile(af, 1, IODD);
-      continue;
-    }
-    copyFile(af, -1, IODD | SKIP);
-  }
-}
-
-
-void mCmd(void) {
-  init();
-  if (getArchive()) {
-    noArchive();
-  }
-  tf2nam = mktemp(tmp2nam);
-  close(creat(tf2nam, 0600));
-  tf2 = open(tf2nam, O_RDWR);
-  if (tf2 < 0) {
-    fprintf(stderr, "ar: cannot create third temp file\n");
-    done(1);
-  }
-  while (!getMember()) {
-    baMatch();
-    if (match()) {
-      mesg('m');
-      copyFile(af, tf2, IODD | OODD | HEAD);
-      continue;
-    }
-    mesg('c');
-    copyFile(af, tf0, IODD | OODD | HEAD);
-  }
-  install();
-}
 
 
 void xCmd(void) {
   int f;
 
-  if (getArchive()) {
+  if (getArchive(&af, arnam)) {
     noArchive();
   }
-  while (!getMember()) {
-    if (namc == 0 || match()) {
-      f = creat(file, arbuf.mode & 0777);
+  while (!getMember(&file, af, &arhead)) {
+    if (namc == 0 || matchargs(&file, namc, namv)) {
+      f = creat(file, arhead.mode & 0777);
       if (f < 0) {
         fprintf(stderr, "ar: cannot create %s\n", file);
         goto sk;
       }
-      mesg('x');
-      copyFile(af, f, IODD);
+      mesg('x', file);
+      copyFile(af, f, IODD, arhead);
       close(f);
       continue;
     }
 sk:
-    mesg('c');
-    copyFile(af, -1, IODD | SKIP);
-    if (namc > 0 && !moreFiles()) {
+    mesg('c', file);
+    copyFile(af, -1, IODD | SKIP, arhead);
+    if (namc > 0 && !moreFiles(namc, namv)) {
       unlinkTempFiles();
-      return(0);
-      //done(0);
+      return;      
     }
   }
 }
 
-
 /**************************************************************/
-
-/* specialized r command for updating symbols */
-
-
-int exec_rCmd(int create, char *args[]) {
-  int i;
-  int res;
-
-  /* reset all global variables */
-  comfun = NULL;
-  for (i = 0; i < 26; i++) {
-    flg[i] = 0;
-  }
-  arnam = NULL;
-  af = 0;
-  namv = NULL;
-  namc = 0;
-  baState = 0;
-  posName = NULL;
-  for (i = 0; i < 20; i++) {
-    tmp0nam[i] = '\0';
-    tmp1nam[i] = '\0';
-    tmp2nam[i] = '\0';
-  }
-  tf0nam = NULL;
-  tf1nam = NULL;
-  tf2nam = NULL;
-  tf0 = 0;
-  tf1 = 0;
-  tf2 = 0;
-  qf = 0;
-  file = NULL;
-  for (i = 0; i < MAX_NAME; i++) {
-    name[i] = '\0';
-  }
-  /* prepare arguments, call r command, cleanup */
-  comfun = rCmd;
-  flg['l' - 'a'] = 1;
-  strcpy(tmp0nam, "v0XXXXXX");
-  strcpy(tmp1nam, "v1XXXXXX");
-  strcpy(tmp2nam, "v2XXXXXX");
-  if (create) {
-    /* ar -rlb firstName archive TEMP_NAME */
-    flg['b' - 'a'] = 1;
-    baState = 1;
-    posName = trim(args[0]);
-    arnam = args[1];
-    namv = &args[2];
-    namc = 1;
-  } else {
-    /* ar -rl archive TEMP_NAME */
-    arnam = args[0];
-    namv = &args[1];
-    namc = 1;
-  }
-  (*comfun)();
-  res = notFound();
-  unlinkTempFiles();
-  return res;
-}
-
-
-/**************************************************************/
-
 
 void usage(void) {
   printf("usage: ar -[%s][%s] archive files ...\n", com, opt);
   done(1);
 }
 
-
-void setcom(void (*fun)(void)) {
-  if (comfun != NULL) {
-    fprintf(stderr, "ar: only one of [%s] allowed\n", com);
-    done(1);
-  }
-  comfun = fun;
-}
-
-
-int cmdCanChangeSymbols(void) {
-  return comfun == dCmd ||
-         comfun == rCmd ||
-         comfun == mCmd;
-}
-
-
-int main(int argc, char *argv[]) {
-  int i;
-  char *cp;
-  char* ptr;
+int main(int argc, char *argv[]) {  
+  char *cp;  
   int res;
-  int cmdf = 0;
+  char cmd;
 
-  for (i = 0; signums[i] != 0; i++) {
-    if (signal(signums[i], SIG_IGN) != SIG_IGN) {
-      signal(signums[i], sigDone);
-    }
-  }
-  strcpy(tmp0nam, "/tmp/v0XXXXXX");
-  strcpy(tmp1nam, "/tmp/v1XXXXXX");
-  strcpy(tmp2nam, "/tmp/v2XXXXXX");
+  
+  strcpy(tmp0nam, "v0XXXXXX");
+  strcpy(tmp1nam, "v1XXXXXX");  
   if (argc < 3 || *argv[1] != '-') {
     usage();
   }
+  cmd = '0';
   for (cp = argv[1] + 1; *cp != '\0'; cp++) {
     switch (*cp) {
       case 'd':
-        setcom(dCmd);
+        cmd = 'd';  
         break;
       case 'r':
-        setcom(rCmd);
-        break;
-      case 'q':
-        setcom(qCmd);
-        break;
+        cmd = 'r';        
+        break;      
       case 't':
-        setcom(tCmd);
-        break;
-      case 'p':
-        setcom(pCmd);
-        break;
-      case 'm':
-        setcom(mCmd);
-        break;
+        cmd = 't';        
+        break;       
       case 'x':
-        setcom(xCmd);
-        break;
-      case 'f':
-        setcom(xCmd);
-        cmdf = 1;
-        arnam = argv[2];
-        namv = &symfilenam;
-        namc = 1;
-        (*comfun)();
-        ptr=getfileSymdefs(TEMP_NAME,argv[3]);
-        printf("%s",ptr);
-        namv = &ptr;
-        (*comfun)();
-        return(0);
-        break;
+        cmd = 'x';        
+        break;      
       case 'v':
       case 'u':
       case 'a':
-      case 'b':
-      case 'c':
-      case 'l':
+      case 'b':      
       case 's':
         flg[*cp - 'a'] = 1;
         break;
@@ -829,41 +498,49 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "ar: bad option '%c'\n", *cp);
         done(1);
     }
-  }
-  if (flg['l' - 'a']) {
-    strcpy(tmp0nam, "v0XXXXXX");
-    strcpy(tmp1nam, "v1XXXXXX");
-    strcpy(tmp2nam, "v2XXXXXX");
-  }
+  }  
   if (flg['a' - 'a'] || flg['b' - 'a']) {
     baState = 1;
-    posName = trim(argv[2]);
-    argv++;
-    argc--;
-    if (argc < 3) {
+    posName = basename(strdup(argv[2]));
+    arnam = argv[3];    
+    namv = &argv[4];
+    namc = argc - 4;
+    if (argc < 4) {
       usage();
     }
-  }
-  arnam = argv[2];
-  namv = argv + 3;
-  namc = argc - 3;
-
-  if (comfun == NULL && !flg['s' - 'a']) {
+  } else {
+    arnam = argv[2];
+    namv = &argv[3];
+    namc = argc - 3;
+  }  
+  
+  if (cmd == '0' && !flg['s' - 'a']) {
     fprintf(stderr, "ar: one of [%ss] must be specified\n", com);
     done(1);
   }
-  res = 0;
-  if (comfun != NULL) {
-    (*comfun)();
-    res = notFound();
-    unlinkTempFiles();
-    if (res != 0) {
-      return res;
+  res = 0;  
+  switch(cmd) {
+      case 'd': dCmd();
+        break;
+      case 'r': rCmd(posName, arnam, namv, namc, flg['a'-'a'], flg['b'-'a'], flg['u'-'a']);
+        break;
+      case 't': tCmd();
+        break;
+      case 'x': xCmd();
+        break;      
     }
+  res = notFound(namc, namv);
+  unlinkTempFiles();
+  if (res != 0) {
+   return res;
   }
+  
   if (flg['s' - 'a'] ||
-      (cmdCanChangeSymbols() && hasSymbols(arnam))) {
+      ((cmd == 'd' || cmd =='r') && hasSymbols(arnam))) {
+    strcpy(tmp0nam, "v0XXXXXX");
+    strcpy(tmp1nam, "v1XXXXXX");  
     res = updateSymbols(arnam, flg['v' - 'a']);
+    unlinkTempFiles();
   }
   return res;
 }

@@ -10,8 +10,9 @@
 int hasSymbols(char *archive);
 int updateSymbols(char *archive, int verbose);
 
-int exec_rCmd(int create, char *args[]);
+void rCmd(char *posName, char* arnam, char **namv, int namc, int aflag, int bflag, int uflag);
+int notFound(int namc, char **namv);
 char* getfileSymdefs(char *symdefs, char *symbol);
-#define TEMP_NAME		"__.SYMDEF"
-
+#define TEMP_NAME		"__.SYMDEF" 
+ 
 #endif /* _RANLIB_H_ */
