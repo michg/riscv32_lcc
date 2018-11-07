@@ -25,7 +25,7 @@
 /**************************************************************/
 
 #define roundup(x,n) (((x)+((n)-1))&(~((n)-1))) 
-#define MAX_STRLEN	400
+#define MAX_STRLEN	600
 
 #define PAGE_SHIFT	12
 #define PAGE_SIZE	(1 << PAGE_SHIFT)
@@ -389,8 +389,8 @@ void fixupRef(Reloc *rel, int scan) {
     else deltaofs = 0;
     if(rel->base.segment==SEGMENT_CODE)
       deltadst = 2*getmaxpos2(rel->value);
-    else
-      deltadst=2*getmaxpos2(segStart[SEGMENT_DATA])&~(SEGALIGN-1);
+    else if (!segStartDefined[SEGMENT_DATA]) deltadst=2*getmaxpos2(segStart[SEGMENT_DATA])&~(SEGALIGN-1);
+    else deltadst = 0;
     rvcdelta = deltadst-deltaofs;
    }
 
@@ -574,18 +574,14 @@ void relocateSegments(void) {
 
   /* determine start of segments */
   if (!segStartDefined[SEGMENT_CODE]) {
-    segStart[SEGMENT_CODE] = 0;
-    segStartDefined[SEGMENT_CODE] = 1;
+    segStart[SEGMENT_CODE] = 0;    
   }
   if (!segStartDefined[SEGMENT_DATA]) {
-    segStart[SEGMENT_DATA] = segStart[SEGMENT_CODE]+segPtr[SEGMENT_CODE]; //+
-                            // PAGE_ROUND(segPtr[SEGMENT_CODE]);
-    segStartDefined[SEGMENT_DATA] = 1;
+    segStart[SEGMENT_DATA] = segStart[SEGMENT_CODE]+segPtr[SEGMENT_CODE]; //
   }
   if (!segStartDefined[SEGMENT_BSS]) {
     segStart[SEGMENT_BSS] = segStart[SEGMENT_DATA] +
                             segPtr[SEGMENT_DATA];
-    segStartDefined[SEGMENT_BSS] = 1;
   }
   /* fixup all references (which now are only relative to segments) */
   rel = relocs;
@@ -593,13 +589,8 @@ void relocateSegments(void) {
     fixupRef(rel, 1);
     rel = rel->next;
   }
-  //rvclist = List_reverse(rvclist);
-  //rvcarray = List_toArray(rvclist, NULL);  
     rvcarray = Set_toArray(rvcset, NULL);
-  //printf("Len:%d\n",Set_length(rvcset));
-   //for(i=0;i<Set_length(rvcset);i++) printf("BS: %d\r\n", *(unsigned int*)rvcarray[i]);
-    qsort(rvcarray, Set_length(rvcset), sizeof (*rvcarray),  cmpint2); 
-   //for(i=0;i<Set_length(rvcset);i++) printf("AS: %d\r\n", *(unsigned int*)rvcarray[i]);
+    qsort(rvcarray, Set_length(rvcset), sizeof (*rvcarray),  cmpint2);    
   
   updatesymbols();
   while (relocs != NULL) {
@@ -1009,9 +1000,13 @@ void writeCode(void) {
 
 
 void writeData(void) {
-  int i, data = 0;
+  unsigned int i, data = 0;
   rewind(dataFile);
-  for(i=0;i<(2*getmaxpos2(segStart[SEGMENT_DATA])&(SEGALIGN-1));i++) fputc(data, outFile);;
+  if(segStartDefined[SEGMENT_DATA])
+    while(ftell(outFile)<segStart[SEGMENT_DATA]-segStart[SEGMENT_CODE]) fputc(data, outFile);  
+  else 
+    for(i=0;i<(2*getmaxpos2(segStart[SEGMENT_DATA])&(SEGALIGN-1));i++) fputc(data, outFile);
+  
   while (1) {
     data = fgetc(dataFile);
     if (data == EOF) {
@@ -1182,8 +1177,7 @@ int main(int argc, char *argv[]) {
   Symbol *Sym;
   char *tmp;  
   undefset = Set_new(0, NULL, NULL); 
-  defset = Set_new(0, NULL, NULL);
-  //rvcset =  Set_new(0, cmpint2, inthash); 
+  defset = Set_new(0, NULL, NULL);  
   rvcset =  Set_new(0, intcmp, inthash); 
   tmpnam(codeName);
   tmpnam(dataName);

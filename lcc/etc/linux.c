@@ -15,6 +15,7 @@ char *cpp[] = {
 	"-DUNIX",
 	"-D_UNIX",
 	"-Dunix",
+    "-zI",
 	"$1",			/* preprocessor include directory */
 	"$2",			/* preprocessor input file */
         "-o",

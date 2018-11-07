@@ -1,5 +1,5 @@
-export LCCDIR=../lcc/bin
-BINUTILSDIR=../binutils/bin
+export LCCDIR=../../lcc/bin
+BINUTILSDIR=../../binutils/bin
 
 
 ${LCCDIR}/lcc -Wo-lccdir=${LCCDIR} -S -target=riscv32 sdmm.c

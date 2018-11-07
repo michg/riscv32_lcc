@@ -20,7 +20,7 @@
 #define NUM_REGS	32
 #define AUX_REG		1
 
-#define LINE_SIZE	400
+#define LINE_SIZE	600
 
 #define TOK_EOL		0
 #define TOK_LABEL	1
@@ -120,6 +120,12 @@
 //#define OP_SLLI         0x001
 #define OP_SRLI         0x005
 #define OP_SRAI         0x105
+#define OP_CSRW		0x1
+#define OP_CSRS		0x2
+#define OP_CSRR		0x2
+#define OP_CSRWI	0x5
+#define OP_CSRSI	0x6
+#define OP_CSRCI	0x7
 #define OP_LB		0x00
 #define OP_LH		0x10
 #define OP_LW		0x20
@@ -132,7 +138,8 @@
 #define OP_SW		0x2
 #define OP_JAL		0x0
 #define OP_JALR		0x0
-#define OP_BRK		0x0
+#define OP_BRK		0x1
+#define OP_MRET		0x302
 #define OP_MUL		0x008
 #define OP_MULH		0x009
 #define OP_MULHSU       0x00A
@@ -255,6 +262,29 @@ unsigned int countbits(int n)
     }
     return count;
 }
+
+typedef struct csrnames {
+  char *name;
+  unsigned int code;
+} Csr;
+
+Csr csrTable[] = {
+  /* pseudo instructions */
+  { "mstatus",  0x300},
+  { "mie",  0x304},
+  { "mtvec",  0x305},
+  { "mepc",  0x341},
+  { "mcause",  0x342},
+  { NULL,  0},
+};
+
+void error(char *fmt, ...);
+unsigned int getcsrcode(char *str) {
+    unsigned int i;
+    for(i=0;csrTable[i].name;i++) if (strcmp(csrTable[i].name, str)==0) return(csrTable[i].code);
+    error("invalid csr name '%s'", str);
+}
+
 /**************************************************************/
 
 
@@ -1372,9 +1402,6 @@ void dotAlign(unsigned int code) {
   if (v.sym != NULL) {
     error("absolute expression expected in line %d", lineno);
   }
-  if (countBits(v.con) != 1) {
-    error("argument must be a power of 2 in line %d", lineno);
-  }
   mask = (1<<v.con) - 1;
   while ((segPtr[currSeg] & mask) != 0) {
     if(mask&1) {
@@ -1804,6 +1831,58 @@ void formatIm(unsigned int code) {
     emitWord( immed<<20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x13);
 }
 
+void formatCsrr(unsigned int code) {
+  int dst;
+  char *p;
+  unsigned int immed;
+
+  /* opcode with register operands and csr */
+    expect(TOK_IREGISTER);
+    dst = tokenvalNumber;
+    getToken();
+    expect(TOK_COMMA);
+    getToken();
+    expect(TOK_IDENT);
+    p = tokenvalString;
+    getToken(); 
+    immed = getcsrcode(p);
+    emitWord( immed<<20 | 0 << 15 | 2<<12 | dst<<7 | 0x73);
+}
+
+void formatCsrw(unsigned int code) {
+  int src1;
+  char *p;
+  unsigned int immed;
+
+  /* opcode with register operands and csr */
+    expect(TOK_IDENT);
+    p = tokenvalString;
+    getToken(); 
+    immed = getcsrcode(p);
+    expect(TOK_COMMA);
+    getToken();
+    expect(TOK_IREGISTER);
+    src1 = tokenvalNumber;
+    getToken();
+    emitWord( immed<<20 | src1 << 15 | code<<12 | 0<<7 | 0x73);
+}
+
+void formatCsrwi(unsigned int code) {
+  Value v;
+  char *p;
+  unsigned int immed;
+
+  /* opcode with register operands and csr */
+    expect(TOK_IDENT);
+    p = tokenvalString;
+    getToken(); 
+    immed = getcsrcode(p);
+    expect(TOK_COMMA);
+    getToken();
+    v = parseExpression();
+    emitWord( immed<<20 | v.con << 15 | code<<12 | 0<<7 | 0x73);
+}
+
 void formatMv(unsigned int code) {
   int dst, src1;
   
@@ -2085,10 +2164,12 @@ void formatLI(unsigned int code) {
     emitHalf( 0x3<<13| ((immed>>17)&0x1)<<12 | dst<<7 | ((immed>>12)&0x1F)<<2 | 0x1);
     src = dst;
   }
-  if(rvc==0 || insrange(6, v.con)==0) {
-    emitWord( (immed&0xFFF)<<20 | src << 15 | (code&0x7)<<12 | dst<<7 | 0x13);
-  } else
-  emitHalf( 0x2<<13| ((immed>>5)&0x1)<<12 | dst<<7 | (immed&0x1F)<<2 | 0x1);
+  if(dst!=0) {
+    if(rvc==0 || insrange(6, v.con)==0) {
+        emitWord( (immed&0xFFF)<<20 | src << 15 | (code&0x7)<<12 | dst<<7 | 0x13);
+    } else
+    emitHalf( 0x2<<13| ((immed>>5)&0x1)<<12 | dst<<7 | (immed&0x1F)<<2 | 0x1);
+  }
 }
 
 void formatLUI(unsigned int code) {
@@ -2110,7 +2191,7 @@ void formatLUI(unsigned int code) {
 void formatBRK(unsigned int code) {
 
    /* BREAK */
-  if(rvc==0) emitWord( 1<<20 | 0x73);
+  if((rvc==0) || (code==OP_MRET)) emitWord( code<<20 | 0x73);
   else emitHalf( 9<<12 | 0x2);
 }
 
@@ -2217,6 +2298,12 @@ Instr instrTable[] = {
   { "slti",    formatIm, OP_SLTI  },
   { "sltiu",   formatIm, OP_SLTIU },
   { "sltiu",   formatIm, OP_SLTIU },
+  { "csrw",   formatCsrw, OP_CSRW  },
+  { "csrs",   formatCsrw, OP_CSRS  },
+  { "csrr",   formatCsrr, OP_CSRR  },
+  { "csrwi",   formatCsrwi, OP_CSRWI },
+  { "csrsi",   formatCsrwi, OP_CSRSI },
+  { "csrci",   formatCsrwi, OP_CSRCI },
   { "lb",      formatLIm, OP_LB    },
   { "lh",      formatLIm, OP_LH    },
   { "lw",      formatLIm, OP_LW    },
@@ -2234,6 +2321,7 @@ Instr instrTable[] = {
   { "sh",      formatS, OP_SH    },
   { "sw",      formatS, OP_SW    },
   { "ebreak",  formatBRK, OP_BRK },
+  { "mret",  formatBRK, OP_MRET },
   { "c.ebreak",  formatBRK, OP_BRK },
   { "mul",     formatR, OP_MUL  },
   { "mulh",    formatR, OP_MULH  },

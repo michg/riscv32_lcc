@@ -1,0 +1,1 @@
+csrs mstatus, x10
