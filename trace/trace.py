@@ -1,6 +1,8 @@
 import sys, os, string
 import binascii
 import struct
+import json
+from collections import namedtuple 
 from sys import argv 
 from Verilog_VCD import parse_vcd
 from types import SimpleNamespace as New
@@ -21,104 +23,76 @@ def make_num(txt):
 
 str2int = make_num
 
-  
-def getfunc(addr): 
-    maxkey = max(address_proc.keys()) 
-    def cost(val):
-        diff = addr - val 
-        if diff >= 0:
-            return(diff)
-        else:
-            return(maxkey + 1)
-    minkey = min(address_proc.keys(), key=cost)
-    return address_proc[minkey] 
+def load_debug():
+    global typemap
+    typemap = {}
+    f = open('dbg.json','r')
+    dbg = json.load(f)
+    
+    typedefs = dbg['typedefs']
+    Type = namedtuple('Type',['name','desc'])
+    for type in typedefs: 
+        typemap[type['number']] = Type(type['name'],type['desc'])
+    
+    global globalmap
+    globalmap = {}
+    globals = dbg['globals']
+    Global = namedtuple('Global',['typenr','adr'])
+    for glob in globals:
+        globalmap[glob['name']] = Global(glob['type'],glob['pos'])
+        
+    global funcmap
+    global funcadr
+    funcadr = []
+    funcmap = {}
+    funcs = dbg['functions']
+    Func = namedtuple('Func',['rtype','adr'])
+    for func in funcs:
+        funcmap[func['funcname']] = Func(func['rtype'],func['pos'])
+        funcadr.append(func['pos'])
+    
+    global adrmap
+    adrmap = {}
+    lines = dbg['locations']
+    Line = namedtuple('Line',['filename','row'])
+    for line in lines:
+        adrmap[line['pos']] = Line(line['filename'], line['row'])
+    
+    global stacklocalmap
+    stacklocalmap = {}
+    slocals = dbg['stacklocals']
+    Slocal = namedtuple('Slocal',['typenr','ofs'])
+    for func in funcmap:
+        stacklocalmap[func] = {}
+    for slocal in slocals:
+        stacklocalmap[slocal['funcname']][slocal['name']] = Slocal(slocal['type'], slocal['pos'])
+    
+    global reglocalmap
+    reglocalmap = {}
+    rlocals = dbg['reglocals']
+    Rlocal = namedtuple('Rlocal',['typenr','regnr'])
+    for func in funcmap:
+        reglocalmap[func] = {}
+    for rlocal in rlocals:
+        reglocalmap[rlocal['funcname']][rlocal['name']] = Rlocal(rlocal['type'], rlocal['pos'])
+    f.close() 
+
+def getfunc(adr):
+    proc = ""
+    min = -1;
+    for key in funcmap:
+        funcadr = funcmap[key].adr
+        if min<0 or adr>=funcadr and adr-funcadr<min:
+            min = adr-funcadr
+            func = key 
+    return(func) 
 
 def checkfuncstart(adr):    
-    if adr in address_proc.keys():
+    if adr in funcadr:
         return(True)
     else:
         return(False)
-    
 
-# --- debug information
-def read_debug_symbols(file):
-    global maxfileline
-    maxfileline = 0
-    for line in open(file):
-        if line.startswith('typedef:'):
-            split = line.split('#')
-            typename, typenum = split[1].split(':')            
-            typenum = int(typenum)            
-            typedesc = split[2]
-            subtypes = {}
-            subtypedesc = typedesc.split(';')          
-            if subtypedesc[0][1] == 's':
-                subtypedesc = subtypedesc[1:-1]
-                for type in subtypedesc:
-                    name, type, bitoffset = type.split(',')
-                    byteoffset = str2int(bitoffset) // 8
-                    subtypes[name] = (type, byteoffset)
-            typedef[typenum] = (typename, typedesc, subtypes)
-         
-    for line in open(file):
-         split = line.split()
-         if split[0] in ['line:', 'function:', 'reglocal:', 'stacklocal', 'global:', 'regparam:', 'stackparam']:
-             address = int(split[-1][2:], 16)
-           
-         if split[0] == 'line:':
-             colon = split[1].rfind(':')
-             filename, line = split[1][1:colon-1], int(split[1][colon+1:])
-             if os.path.basename(filename) == srcname:
-                 if address not in address_line or address_line[address] < line: 
-                     line_address[line] = address
-                     address_line[address] = line
-                 if line>maxfileline:
-                     maxfileline = line
-
-         elif split[0] == 'reglocal:':
-             data = bytes.fromhex(split[-1][2:])
-             res, = struct.unpack('>i', data)
-             proc, var = split[1].split(':')
-             typenum = int(split[2])
-             local_var.setdefault(proc, {})[var] = (res, typenum, 'reglocal') 
-       
-         elif split[0] == 'stacklocal:':
-             data = bytes.fromhex(split[-1][2:])
-             res, = struct.unpack('>i', data)
-             proc, var = split[1].split(':')
-             typenum = int(split[2])
-             local_var.setdefault(proc, {})[var] = (res, typenum, 'stacklocal')
-
-         elif split[0] == 'function:':
-             name = split[1]             
-             proc_address[name] = address             
-
-         elif split[0] == 'regparam:': 
-             proc, var = split[1].split(':')
-             typenum = int(split[2])
-             local_var.setdefault(proc, {})[var] = (address, typenum, 'regparam') 
-        
-         elif split[0] == 'stackparam:':
-             proc, var = split[1].split(':')
-             typenum = int(split[2])
-             local_var.setdefault(proc, {})[var] = (address, typenum, 'stackparam') 
-
-         elif split[0] == 'global:':
-             typenum = int(split[2])
-             global_var[split[1]] = (address, typenum)
-
-
-
-def load_debug_information(module):
-    global typedef, local_var, global_var, proc_address, address_proc, address_line, line_address, srcname
-    typedef, local_var, global_var, proc_address, address_line, line_address = {}, {}, {}, {}, {}, {}
-    maxline = 0
-    srcname = module + '.c'
-    read_debug_symbols(module)
-    
-    address_proc = dict([(v,k) for k,v in proc_address.items()])
-    
-    address_global_var = dict([(b[0],a) for a,b in global_var.items()])
 
 def getsigvalstr(name):
     global signals
@@ -130,7 +104,7 @@ def getsigvalstr(name):
 
 if __name__ == '__main__':
    # --- load debug information
-    load_debug_information(argv[1]+'.deb')
+    load_debug()
     table = parse_vcd('system.vcd',siglist = \
     ['system_tb.clk', \
     'system_tb.uut.picorv32_core.reg_pc[31:0]', \
@@ -149,7 +123,7 @@ if __name__ == '__main__':
     pctimevals = []
     watchadr = {}
     for var in globals:
-        watchadr[global_var[var][0]] = var
+        watchadr[globalmap[var].adr] = var
     for code in table.keys():
         name = table[code]['nets'][0]['name']
         tv = table[code]['tv']
@@ -177,7 +151,7 @@ if __name__ == '__main__':
         
             if(pcval!=lastpcval and checkfuncstart(pcval)):
                 curvalstr = getsigvalstr('\cpuregs[12][31:0]')
-                calledfunc = address_proc[pcval] 
+                calledfunc = getfunc(pcval) 
                 print("@time=%d ns, PC=%08x funktion %s(%08x) called with %s" \
                 %(time//1000, lastpcval, calledfunc,  pcval, curvalstr))
             curfunc = getfunc(pcval) 

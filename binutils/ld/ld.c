@@ -66,7 +66,8 @@ char destfile[40];
 FILE *codeFile = NULL;
 FILE *dataFile = NULL;
 FILE *outFile = NULL;
-FILE *debFile =NULL;
+FILE *debFile = NULL;
+FILE *JsondebFile = NULL;
 FILE *mapFile = NULL;
 FILE *inFile = NULL;
 
@@ -167,6 +168,17 @@ int rvcreg(int reg) {
  return((reg>=8 && reg<=15)? 1 : 0);
 }
 
+int str2int(char *p, unsigned int *num) {
+    *num = 0;
+    while (isdigit(*p)) {
+        if (*p > '9' || *p < '0')
+            return -1;
+        *num = *num * 10 + *p - '0';
+        p++;
+    }
+    return 0;
+}
+ 
 void error(char *fmt, ...) {
   va_list ap;
 
@@ -279,6 +291,57 @@ Set_T undefset;
 Set_T defset;
 Set_T rvcset;
 List_T liblist;
+List_T linelist;
+List_T funclist;
+List_T globallist;
+List_T reglocallist;
+List_T stacklocallist;
+List_T typedeflist;
+
+typedef struct linedata {
+    char* filename;
+    char* row;
+    unsigned int pos;
+} *Linedata;
+
+typedef struct funcdata {
+    char* funcname;
+    unsigned int rtype;
+    unsigned int pos;
+} *Funcdata;
+
+typedef struct globaldata {    
+    char* name;
+    unsigned int type;
+    unsigned int pos;
+} *Globaldata;
+
+typedef struct reglocaldata {    
+    char* funcname;
+    char* name;
+    unsigned int type;
+    unsigned int pos;
+} *Reglocaldata;
+
+typedef struct stacklocaldata {    
+    char* funcname;
+    char* name;
+    unsigned int type;
+    unsigned int pos;
+} *Stacklocaldata;
+
+typedef struct typedefdata {        
+    char* name;
+    unsigned int number;
+    char* desc;
+} *Typedefdata;
+
+void **linearray;
+void **funcarray;
+void **globalarray;
+void **stacklocalarray;
+void **reglocalarray;
+void **typedefarray;
 void **rvcarray;
 
 
@@ -927,19 +990,76 @@ void printliststring(Lelem* x) {
 }
 
 void printdebSymbol(Symbol *s) {  
+  Linedata line;
+  Funcdata func;
+  Globaldata global;
+  Reglocaldata reglocal;
+  Stacklocaldata stacklocal;
+  Typedefdata typedefine;
+  int sep;
+  char *str;
+  unsigned int val;
   switch (s->debug) {
     /* debug symbol */
     case DBG_LINE: fprintf(debFile, "line: %s @ 0x%08X\n", s->name, s->value+segStart[s->type]);
+                   NEW(line);
+                   sep = strcspn(s->name, ":");
+                   line->filename = strndup(s->name, sep);
+                   line->row = strndup(s->name + sep + 1, strlen(s->name) - strlen(line->filename) - 1);
+                   line->pos = s->value+segStart[s->type];
+                   linelist = List_push(linelist, (void *)line);                   
                    break;    
     case DBG_FUNC:fprintf(debFile, "function: %s @ 0x%08X\n", s->name, roundup(s->value+segStart[s->type], FUNCALIGN));
+                   NEW(func);
+                   sep = strcspn(s->name, " ");
+                   func->funcname = strndup(s->name, sep);
+                   str2int(s->name + sep + 1, &val); 
+                   func->rtype = val;
+                   func->pos = roundup(s->value+segStart[s->type], FUNCALIGN);
+                   funclist = List_push(funclist, (void *)func);                   
                    break;
     case DBG_VARGLO: fprintf(debFile, "global: %s @ 0x%08X\n", s->name, s->value+segStart[s->type]);
-                     break;
+                   NEW(global);
+                   sep = strcspn(s->name, " ");
+                   global->name = strndup(s->name, sep);
+                   str2int(s->name + sep + 1, &val); 
+                   global->type = val;
+                   global->pos = s->value+segStart[s->type];
+                   globallist = List_push(globallist, (void *)global);                   
+                   break;
     case DBG_VARLOCSTACK: fprintf(debFile, "%s\n", s->name);      //local or locparam
+                          NEW(stacklocal);
+                          str = strdup(s->name);
+                          strtok(str," ");
+                          stacklocal->funcname = strtok(NULL, ":");
+                          stacklocal->name = strtok(NULL, " ");
+                          str2int(strtok(NULL," "), &val);
+                          stacklocal->type = val;
+                          strtok(NULL," ");                          
+                          stacklocal->pos = strtol(strtok(NULL, " "), NULL, 16);
+                          stacklocallist = List_push(stacklocallist, (void *)stacklocal);                   
                           break;
     case DBG_VARLOCREG: fprintf(debFile, "%s\n", s->name); // reglocal or regparam
+                        NEW(reglocal);
+                          str = strdup(s->name);
+                          strtok(str," ");
+                          reglocal->funcname = strtok(NULL, ":");
+                          reglocal->name = strtok(NULL, " ");
+                          str2int(strtok(NULL," "), &val); 
+                          reglocal->type = val;
+                          strtok(NULL," ");                          
+                          reglocal->pos = strtol(strtok(NULL, " "), NULL, 16);
+                          reglocallist = List_push(reglocallist, (void *)reglocal);                   
                         break;
     case DBG_TYPEDEF: fprintf(debFile, "%s\n", s->name); // typedef
+                        NEW(typedefine);
+                        str = strdup(s->name);
+                        strsep(&str,"#");
+                        typedefine->name = strsep(&str, ":");
+                        str2int(strsep(&str,"#"), &val); 
+                        typedefine->number = val;                        
+                        typedefine->desc = strsep(&str, " ");
+                        typedeflist = List_push(typedeflist, (void *)typedefine); 
                       break;
     default: break;
   }
@@ -1352,8 +1472,72 @@ int main(int argc, char *argv[]) {
   if (mapFile != NULL) {
     printToMapFile();
   }
-  if (debFile != NULL) {
+  if (debFile != NULL) {    
     printToDebFile();
+    
+    JsondebFile = fopen("dbg.json", "w");
+    linearray = List_toArray(linelist, NULL);    
+    fprintf(JsondebFile,"{\n  \"locations\": [\n");
+    for(i=0;i<List_length(linelist)-1;i++) {
+        fprintf(JsondebFile,"    {\n    \"filename\":%s,\n    \"row\":%s,\n    \"pos\":%d\n    },\n",
+        ((Linedata)linearray[i])->filename,((Linedata)linearray[i])->row,((Linedata)linearray[i])->pos);
+    }
+    fprintf(JsondebFile,"    {\n    \"filename\":%s,\n    \"row\":%s,\n    \"pos\":%d\n    }\n",
+    ((Linedata)linearray[i])->filename,((Linedata)linearray[i])->row,((Linedata)linearray[i])->pos);    
+    fprintf(JsondebFile,"  ],\n");
+    
+    funcarray = List_toArray(funclist, NULL);
+    fprintf(JsondebFile,"  \"functions\": [\n");
+    for(i=0;i<List_length(funclist)-1;i++) {
+        fprintf(JsondebFile,"    {\n    \"funcname\":\"%s\",\n    \"rtype\":%d,\n    \"pos\":%d\n    },\n",
+        ((Funcdata)funcarray[i])->funcname,((Funcdata)funcarray[i])->rtype,((Funcdata)funcarray[i])->pos);
+    }
+    fprintf(JsondebFile,"    {\n    \"funcname\":\"%s\",\n    \"rtype\":%d,\n    \"pos\":%d\n    }\n",
+        ((Funcdata)funcarray[i])->funcname,((Funcdata)funcarray[i])->rtype,((Funcdata)funcarray[i])->pos);
+    fprintf(JsondebFile,"  ],\n");
+    
+    globalarray = List_toArray(globallist, NULL);
+    fprintf(JsondebFile,"  \"globals\": [\n");
+    for(i=0;i<List_length(globallist)-1;i++) {
+        fprintf(JsondebFile,"    {\n    \"name\":\"%s\",\n    \"type\":%d,\n    \"pos\":%d\n    },\n",
+        ((Globaldata)globalarray[i])->name,((Globaldata)globalarray[i])->type,((Globaldata)globalarray[i])->pos);
+    }
+    fprintf(JsondebFile,"    {\n    \"name\":\"%s\",\n    \"type\":%d,\n    \"pos\":%d\n    }\n",
+        ((Globaldata)globalarray[i])->name,((Globaldata)globalarray[i])->type,((Globaldata)globalarray[i])->pos);
+    fprintf(JsondebFile,"  ],\n");
+    
+    stacklocalarray = List_toArray(stacklocallist, NULL);
+    fprintf(JsondebFile,"  \"stacklocals\": [\n");
+    for(i=0;i<List_length(stacklocallist)-1;i++) {
+        fprintf(JsondebFile,"    {\n    \"funcname\":\"%s\",\n    \"name\":\"%s\",\n    \"type\":%d,\n    \"pos\":%d\n    },\n",
+        ((Stacklocaldata)stacklocalarray[i])->funcname,((Stacklocaldata)stacklocalarray[i])->name,((Stacklocaldata)stacklocalarray[i])->type,((Stacklocaldata)stacklocalarray[i])->pos);
+    }
+       fprintf(JsondebFile,"    {\n    \"funcname\":\"%s\",\n    \"name\":\"%s\",\n    \"type\":%d,\n    \"pos\":%d\n    }\n",
+        ((Stacklocaldata)stacklocalarray[i])->funcname,((Stacklocaldata)stacklocalarray[i])->name,((Stacklocaldata)stacklocalarray[i])->type,((Stacklocaldata)stacklocalarray[i])->pos);
+    fprintf(JsondebFile,"  ],\n");
+    
+    reglocalarray = List_toArray(reglocallist, NULL);
+    fprintf(JsondebFile,"  \"reglocals\": [\n");
+    for(i=0;i<List_length(reglocallist)-1;i++) {
+        fprintf(JsondebFile,"    {\n    \"funcname\":\"%s\",\n    \"name\":\"%s\",\n    \"type\":%d,\n    \"pos\":%d\n    },\n",
+        ((Reglocaldata)reglocalarray[i])->funcname,((Reglocaldata)reglocalarray[i])->name,((Reglocaldata)reglocalarray[i])->type,((Reglocaldata)reglocalarray[i])->pos);
+    }
+       fprintf(JsondebFile,"    {\n    \"funcname\":\"%s\",\n    \"name\":\"%s\",\n    \"type\":%d,\n    \"pos\":%d\n    }\n",
+        ((Reglocaldata)reglocalarray[i])->funcname,((Reglocaldata)reglocalarray[i])->name,((Reglocaldata)reglocalarray[i])->type,((Reglocaldata)reglocalarray[i])->pos);
+    fprintf(JsondebFile,"  ],\n");
+    
+    typedefarray = List_toArray(typedeflist, NULL);
+    fprintf(JsondebFile,"  \"typedefs\": [\n");
+    for(i=0;i<List_length(typedeflist)-1;i++) {
+        fprintf(JsondebFile,"    {\n    \"name\":\"%s\",\n    \"number\":%d,\n    \"desc\":\"%s\"\n    },\n",
+        ((Typedefdata)typedefarray[i])->name,((Typedefdata)typedefarray[i])->number,((Typedefdata)typedefarray[i])->desc);
+    }
+    fprintf(JsondebFile,"    {\n    \"name\":\"%s\",\n    \"number\":%d,\n    \"desc\":\"%s\"\n    }\n",
+        ((Typedefdata)typedefarray[i])->name,((Typedefdata)typedefarray[i])->number,((Typedefdata)typedefarray[i])->desc);   
+    fprintf(JsondebFile,"  ]\n");
+    
+    fprintf(JsondebFile,"}");
+    fclose(JsondebFile);
   }
   if (codeFile != NULL) {
     fclose(codeFile);
