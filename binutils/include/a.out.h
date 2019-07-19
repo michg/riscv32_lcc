@@ -22,6 +22,16 @@
 #define SEGMENT_DATA	2	/* initialized data segment */
 #define SEGMENT_BSS	3	/* uninitialized data segment */
 
+#define DBG_LINE 1
+#define DBG_FUNCBEG 2
+#define DBG_FUNCEND 3
+#define DBG_FUNCRET 4
+#define DBG_FUNCARGREG 5
+#define DBG_FUNCARGSTACK 6
+#define DBG_VARGLO 7
+#define DBG_TYPEDEF 8
+#define DBG_VARLOCSTACK 9
+#define DBG_VARLOCREG 10
 
 typedef struct {
   unsigned int magic;		/* must be EXEC_MAGIC */
@@ -49,6 +59,8 @@ typedef struct {
   int value;			/* if symbol defined: the symbol's value */
 				/* if symbol not defined: meaningless */
   int debug;
+  int debugtype;
+  int debugvalue;
 } SymbolRecord;
 
 

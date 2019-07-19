@@ -118,9 +118,22 @@ def load_debug():
     global funcmap
     funcmap = {}
     funcs = dbg['functions']
-    Func = namedtuple('Func',['rtype','adr'])
+    Func = namedtuple('Func',['rettype','startpos','endpos','stacklocals','reglocals'])
+    Stackvar =  namedtuple('Stackvar',['type','pos'])
+    Regvar =  namedtuple('Regvar',['type','pos'])
     for func in funcs:
-        funcmap[func['funcname']] = Func(func['rtype'],func['pos'])
+        stacks = func['stacklocals'] + func['stackargs']
+        stackmap = {}
+        
+        for stack in stacks:        
+            stackmap[stack['name']] = Stackvar(stack['type'], stack['pos'])
+        regs = func['reglocals'] + func['regargs']
+        regmap = {}
+        
+        for reg in regs:        
+            regmap[reg['name']] = Regvar(reg['type'], reg['pos'])
+        funcmap[func['funcname']] = Func(func['rettype'],func['startpos'], func['endpos'], stackmap, regmap) 
+    
     
     global adrmap
     global linemap
@@ -135,23 +148,7 @@ def load_debug():
         linemap[line['filename']][line['row']] = line['pos']
         
     
-    global stacklocalmap
-    stacklocalmap = {}
-    slocals = dbg['stacklocals']
-    Slocal = namedtuple('Slocal',['typenr','ofs'])
-    for func in funcmap:
-        stacklocalmap[func] = {}
-    for slocal in slocals:
-        stacklocalmap[slocal['funcname']][slocal['name']] = Slocal(slocal['type'], slocal['pos'])
     
-    global reglocalmap
-    reglocalmap = {}
-    rlocals = dbg['reglocals']
-    Rlocal = namedtuple('Rlocal',['typenr','regnr'])
-    for func in funcmap:
-        reglocalmap[func] = {}
-    for rlocal in rlocals:
-        reglocalmap[rlocal['funcname']][rlocal['name']] = Rlocal(rlocal['type'], rlocal['pos'])
     f.close()
     
 class dbgif(metaclass=abc.ABCMeta):
@@ -382,19 +379,21 @@ class DebugCli(cmd.Cmd):
         else:
             subvar = ''
         
-        curfunc = get_func(Rsp.pc) 
-        if var in stacklocalmap[curfunc]:
-            ofs = stacklocalmap[curfunc][var].ofs
+        curfunc = get_func(Rsp.pc)
+        stackmap = funcmap[curfunc].stacklocals
+        regmap = funcmap[curfunc].reglocals
+        if var in stackmap:
+            ofs = stackmap[var].pos
             curbase = Rsp.get_register(8); 
             adr = curbase + ofs         
-            typenr = stacklocalmap[curfunc][var].typenr
+            typenr = stackmap[var].type
             adr, typename = ptr_array_struct(typenr, deref, adr, index, subvar)
             val = read_type(adr, typename)
             self.output += "%s:%s@%08X=%08X\n"%(line, typename, adr, val)
-        elif var in reglocalmap[curfunc]:
-            regnum = reglocalmap[curfunc][var].regnr
+        elif var in regmap:
+            regnum = regmap[var].pos
             val = Rsp.get_register(regnum);
-            typenr = reglocalmap[curfunc][var].typenr
+            typenr = regmap[var].type
             adr = 0
             adr, typename = ptr_array_struct(typenr, deref, adr, index, subvar)
             val = read_type(adr, typename)
@@ -417,10 +416,12 @@ class DebugCli(cmd.Cmd):
             return
         curfunc = get_func(Rsp.pc) 
         self.output = "Funktion:%s"%curfunc
-        for var in stacklocalmap[curfunc]:
-            self.output += "%s:%s\n"%(var, typemap[stacklocalmap[curfunc][var].typenr].name) 
-        for var in reglocalmap[curfunc]:
-            self.output += "%s:%s\n"%(var, typemap[reglocalmap[curfunc][var].typenr].name)
+        stackmap = funcmap[curfunc].stacklocals
+        regmap = funcmap[curfunc].reglocals
+        for var in stackmap:
+            self.output += "%s:%s\n"%(var, typemap[stackmap[var].type].name) 
+        for var in regmap:
+            self.output += "%s:%s\n"%(var, typemap[regmap[var].type].name)
     
     do_sloc = do_showlocals
     
@@ -640,13 +641,10 @@ Rsp = gdbrsp(4567)
 
 
 def get_func(adr):
-    proc = ""
-    min = -1;
+    func = ""
     for key in funcmap:
-        funcadr = funcmap[key].adr
-        if min<0 or adr>=funcadr and adr-funcadr<min:
-            min = adr-funcadr
-            func = key 
+        if ((adr >= funcmap[key].startpos) and (adr<=funcmap[key].endpos)):
+            func = key
     return(func)
     
 

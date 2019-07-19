@@ -45,6 +45,8 @@
 #define TOK_CARET	19
 #define TOK_DOTRELADR 	20
 #define TOK_FREGISTER	21
+#define TOK_ADD	22
+
 
 #define STATUS_UNKNOWN	0	/* symbol is not yet defined */
 #define STATUS_DEFINED	1	/* symbol is defined */
@@ -55,12 +57,7 @@
 
 #define MSB	((unsigned int) 1 << (sizeof(unsigned int) * 8 - 1))
 
-#define DBG_LINE 1
-#define DBG_FUNC 2
-#define DBG_VARGLO 3
-#define DBG_TYPEDEF 4
-#define DBG_VARLOCSTACK 5
-#define DBG_VARLOCREG 6
+
 /**************************************************************/
 
 
@@ -347,12 +344,12 @@ void freeMemory(void *p) {
 int getNextToken(void) {
   char *p;
   int base;
-  int digit;
+  long long int digit;
 
   while (*lineptr == ' ' || *lineptr == '\t') {
     lineptr++;
   }
-  if (*lineptr == '\n' || *lineptr == '\0' || *lineptr == ';') {
+  if (*lineptr == '\n' || *lineptr == '\0' || *lineptr == ';' || *lineptr == '#' || (*lineptr == '/' && *(lineptr + 1) == '*')) {
     return TOK_EOL;
   }
   if (*lineptr == 'x'){
@@ -528,6 +525,10 @@ int getNextToken(void) {
   if (*lineptr == '^') {
     lineptr++;
     return TOK_CARET;
+  }
+  if (*lineptr == '@') {
+    lineptr++;
+    return TOK_ADD;
   }
   error("illegal character 0x%02X in line %d", *lineptr, lineno);
   return 0;
@@ -916,6 +917,7 @@ void emitWord(unsigned int word) {
 
 typedef struct {
   int con;
+  long long int lcon;
   Symbol *sym;
 } Value;
 
@@ -928,7 +930,8 @@ Value parsePrimaryExpression(void) {
   Symbol *s;
 
   if (token == TOK_NUMBER) {
-    v.con = tokenvalNumber;
+    v.con = tokenvalNumber & 0xFFFFFFFF;
+	v.lcon = tokenvalNumber;
     v.sym = NULL;
     getToken();
   } else
@@ -1044,7 +1047,8 @@ Value parseAdditiveExpression(void) {
       getToken();
       v2 = parseMultiplicativeExpression();
       if (v2.sym != NULL) {
-        error("subtraction of symbols not supported, line %d", lineno);
+        printf("subtraction of symbols not supported, line %d\r\n", lineno);
+        v2.con = 0;
       }
       v1.con -= v2.con;
     }
@@ -1155,6 +1159,7 @@ void dotCode(unsigned int code) {
 
 void dotData(unsigned int code) {
   currSeg = SEGMENT_DATA;
+  while(token != TOK_EOL) getToken();
 }
 
 
@@ -1162,7 +1167,9 @@ void dotBss(unsigned int code) {
   currSeg = SEGMENT_BSS;
 }
 
-
+void Ignore(unsigned int code) {
+	 while(token != TOK_EOL) getToken();
+}
 
 void dotStabs(unsigned int code) {
   Value v;
@@ -1213,25 +1220,53 @@ void dotStabs(unsigned int code) {
             label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
             local = deref(lookupEnter(name, LOCAL_TABLE, 0));
             label->status = STATUS_DEFINED;
-            label->segment = currSeg;
+            label->segment = currSeg; 
             label->value = local->value;
             label->debug = DBG_VARGLO;
             ptr+=2;
             label->debugvalue = 0;
             break; 
   case 'f':
-  case 'F': n=sprintf(debuglabel,"%s ",name);
+  case 'F': n=sprintf(debuglabel,"%s beg",name);
             strcpy(funcname,name);
             label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
             label->status = STATUS_DEFINED;
             label->segment = currSeg;
             label->value = segPtr[currSeg];            
-            label->debug = DBG_FUNC;
+            label->debug = DBG_FUNCBEG;
+            ptr+=2;            
+            n = sprintf(debuglabel,"%s ret",name);
+            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
+            label->status = STATUS_DEFINED;
+            label->segment = currSeg;
+            label->value = segPtr[currSeg];            
+            label->debug = DBG_FUNCRET;
+            str2int(ptr, &i);
+            label->debugtype = i;
+            return;
+            break;    
+  case 'E': n=sprintf(debuglabel,"%s end",name);
+            strcpy(funcname,name);
+            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
+            label->status = STATUS_DEFINED;
+            label->segment = currSeg;
+            label->value = segPtr[currSeg];            
+            label->debug = DBG_FUNCEND;
             ptr+=2;
+            return;
             break;  
-  case 'P':
-  case 'r': if(ch=='P') n = sprintf(debuglabel,"regparam: ");
-            else n = sprintf(debuglabel, "reglocal: ");
+  case 'P': n = sprintf(debuglabel,"regpar: ");    
+            n += sprintf(debuglabel + n,"%s:", funcname);
+            sprintf(debuglabel + n,"%s ", name);
+            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
+            label->status = STATUS_DEFINED;
+            label->segment = currSeg;
+            label->value = segPtr[currSeg];
+            label->debug = DBG_FUNCARGREG;
+            ptr+=2;
+            label->debugvalue = v.con;
+            break;
+  case 'r': n = sprintf(debuglabel, "reglocal: ");
             n += sprintf(debuglabel + n,"%s:", funcname);
             sprintf(debuglabel + n,"%s ", name);
             label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
@@ -1242,25 +1277,33 @@ void dotStabs(unsigned int code) {
             ptr+=2;
             label->debugvalue = v.con;
             break;
-  default:
-            if(ch=='p') {
-                  n = sprintf(debuglabel,"stackparam: ");
-                  ptr++;
-                } else n = sprintf(debuglabel, "stacklocal: ");
-                n += sprintf(debuglabel + n,"%s:", funcname);
-                sprintf(debuglabel + n,"%s ", name);
-                label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
-                label->status = STATUS_DEFINED;
-                label->segment = currSeg;
-                label->value = segPtr[currSeg];
-                label->debug = DBG_VARLOCSTACK;
-                ptr++;
-                label->debugvalue = v.con;
-                break;
+  case 'p': n = sprintf(debuglabel,"stackpar: ");
+            n += sprintf(debuglabel + n,"%s:", funcname);
+            sprintf(debuglabel + n,"%s ", name);
+            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
+            label->status = STATUS_DEFINED;
+            label->segment = currSeg;
+            label->value = segPtr[currSeg];
+            label->debug = DBG_FUNCARGSTACK;
+            ptr+=2;
+            label->debugvalue = v.con;
+            break;
+  default:  n = sprintf(debuglabel, "stacklocal: ");
+            n += sprintf(debuglabel + n,"%s:", funcname);
+            sprintf(debuglabel + n,"%s ", name);
+            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
+            label->status = STATUS_DEFINED;
+            label->segment = currSeg;
+            label->value = segPtr[currSeg];
+            label->debug = DBG_VARLOCSTACK;
+            ptr++;
+            label->debugvalue = v.con;            
+            break;
   }
   str2int(ptr, &i);
   sprintf(label->name+strlen(label->name),"%d",i); 
-  if(label->debug==DBG_VARLOCSTACK || label->debug==DBG_VARLOCREG) {
+  label->debugtype = i;
+  if(label->debug==DBG_VARLOCSTACK || label->debug==DBG_VARLOCREG || label->debug==DBG_FUNCARGSTACK || label->debug==DBG_FUNCARGREG) {
     sprintf(label->name+strlen(label->name), " @ 0x%08X", label->debugvalue);
   }
  }
@@ -1295,7 +1338,7 @@ void dotFile(unsigned int code) {
 }
 
 void dotLoc(unsigned int code) {
-  Value v;
+  Value v, w;
   Symbol* label;
   v = parseExpression();
   if (v.sym != NULL) {
@@ -1304,6 +1347,12 @@ void dotLoc(unsigned int code) {
   v = parseExpression();
   if (v.sym != NULL) {
     error("absolute expression expected in line %d", lineno);
+  }
+  if(token != TOK_EOL) {
+      w = parseExpression();
+    if (w.sym != NULL) {
+        error("absolute expression expected in line %d", lineno);
+    }
   }
   if(debug) {
     sprintf(debuglabel,"\"%s\":%d",srcfileName,v.con);
@@ -1351,6 +1400,30 @@ void dotExport(unsigned int code) {
   }
 }
 
+void dotSet(unsigned int code) {
+  Symbol *global;
+  Symbol *globalnew;
+
+ 
+    expect(TOK_IDENT);
+    globalnew = lookupEnter(tokenvalString, GLOBAL_TABLE, 0);
+    if (globalnew->status == STATUS_DEFINED) {
+      error("'%s' already not defined, line %d",
+            globalnew->name, lineno);
+    }
+    getToken();
+	expect(TOK_COMMA);
+    getToken();
+	expect(TOK_IDENT);
+	global = lookupEnter(tokenvalString, GLOBAL_TABLE, 0);
+    if (global->status != STATUS_DEFINED) {
+      error(".set '%s' not defined, line %d",
+            global->name, lineno);
+    }
+	globalnew->segment = global->segment;
+	globalnew->value = global->value;
+	getToken();
+}
 
 void dotImport(unsigned int code) {
   Symbol *global;
@@ -1414,6 +1487,7 @@ void dotAlign(unsigned int code) {
       }
     }
   }
+  while(token != TOK_EOL) getToken();
 }
 
 
@@ -1471,6 +1545,7 @@ void dotByte(unsigned int code) {
 }
 
 
+
 void dotHalf(unsigned int code) {
   Value v;
 
@@ -1507,7 +1582,21 @@ void dotWord(unsigned int code) {
 }
 
 
-void dotSet(unsigned int code) {
+void dotDword(unsigned int code) {
+  Value v;
+
+  while (1) {
+    v = parseExpression();
+    emitWord(v.lcon&0xFFFFFFFF);
+    emitWord((v.lcon>>32)&0xFFFFFFFF);   
+    if (token != TOK_COMMA) {
+      break;
+    }
+    getToken();
+  }
+}
+
+void dotSet2(unsigned int code) {
   Value v;
   Symbol *symbol;
 
@@ -1573,6 +1662,36 @@ void formatRF(unsigned int code) {
   src2 = tokenvalNumber;
   getToken();
   emitWord(((code>>4)&0x7F) << 25 | src2 << 20 | src1 << 15 | (code&7)<<12 | dst<<7 | 0x53);
+}
+
+void formatNF(unsigned int code) {
+  int dst, src1;
+
+  /* opcode with two register operands */
+  expect(TOK_FREGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_FREGISTER);
+  src1 = tokenvalNumber;
+  getToken();
+  emitWord(((code>>4)&0x7F) << 25 | src1 << 20 | src1 << 15 | (code&7)<<12 | dst<<7 | 0x53);
+}
+
+void formatMF(unsigned int code) {
+  int dst, src1;
+
+  /* opcode with three register operands */
+  expect(TOK_FREGISTER);
+  dst = tokenvalNumber;
+  getToken();
+  expect(TOK_COMMA);
+  getToken();
+  expect(TOK_FREGISTER);
+  src1 = tokenvalNumber;
+  getToken();
+  emitWord(((code>>4)&0x7F) << 25 | src1 << 20 | src1 << 15 | (code&7)<<12 | dst<<7 | 0x53);
 }
 
 void formatRF2(unsigned int code) {
@@ -1842,6 +1961,7 @@ void formatCsrr(unsigned int code) {
     getToken();
     expect(TOK_COMMA);
     getToken();
+    getToken();
     expect(TOK_IDENT);
     p = tokenvalString;
     getToken(); 
@@ -2108,11 +2228,25 @@ void formatUJ(unsigned int code) {
   Value v;
 
   /* jal opcode with one register operands and label */
-  expect(TOK_IREGISTER);
-  dst = tokenvalNumber;
-  getToken();
-  expect(TOK_COMMA);
-  getToken();
+  //expect(TOK_IREGISTER);
+  if(token == TOK_IREGISTER) {
+    dst = tokenvalNumber;    
+    getToken();
+    expect(TOK_COMMA);
+    getToken();
+  }  else
+    dst = 1;
+  v = parseExpression();
+  addFixup(v.sym, currSeg, segPtr[currSeg], METHOD_J20, v.con);
+  emitWord(dst<<7 | 0x6F);
+}
+
+void formatJ(unsigned int code) {
+  int dst;
+  Value v;
+
+  /* jal opcode with label */  
+  dst = 0;  
   v = parseExpression();
   addFixup(v.sym, currSeg, segPtr[currSeg], METHOD_J20, v.con);
   emitWord(dst<<7 | 0x6F);
@@ -2137,6 +2271,34 @@ void formatJR(unsigned int code) {
   v = parseExpression();
   immed = v.con;
   immed &= 0xFFF;
+
+  emitWord( immed<<20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x67);
+}
+
+void formatJ0R(unsigned int code) {
+  int dst, src1;
+  Value v;
+  unsigned int immed;
+
+  /* opcode with one register operands and immediate */  
+  dst = 0;  
+  expect(TOK_IREGISTER);
+  src1 = tokenvalNumber;
+  immed = 0;
+  getToken();  
+  emitWord( immed<<20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x67);
+}
+
+
+void formatRET(unsigned int code) {
+  int dst, src1;
+  unsigned int immed;
+
+  /* opcode with two register operands and immediate */  
+  dst = 0;
+  getToken();  
+  src1 = 1;  
+  immed = 0;  
 
   emitWord( immed<<20 | src1 << 15 | (code&0x7)<<12 | dst<<7 | 0x67);
 }
@@ -2217,27 +2379,47 @@ Instr instrTable[] = {
   { ".nosyn",  dotNosyn,  0 },
   { ".text",   dotCode,   0 },
   { ".data",   dotData,   0 },
+  { ".section", dotData,   0 },
   { ".bss",    dotBss,    0 },
   { ".globl", dotExport, 0 },
   { ".import", dotImport, 0 },
   { ".align",  dotAlign,  0 },
+  { ".p2align",  dotAlign,  0 },
   { ".space",  dotSpace,  0 },
   { ".locate", dotLocate, 0 },
   { ".byte",   dotByte,   0 },
+  { ".asciz",   dotByte,   0 },
   { ".half",   dotHalf,   0 },
+  { ".short",   dotHalf,   0 },
   { ".word",   dotWord,   0 },
+  { ".long",   dotWord,   0 },
+  { ".quad",   dotDword,   0 },
   { ".set",    dotSet,    0 },
   { ".file",   dotFile,   0 },
   { ".loc",    dotLoc,    0 },
   { ".stabs",  dotStabs,  0 },
   { ".stabn",  dotStabn,  0 },
-   /* single precision floating point instructions */
+  { ".type",  Ignore,  0 },
+  { ".size",  Ignore,  0 },
+  { ".ident",  Ignore,  0 },
+  { ".equ",  Ignore,  0 },
+  { ".weak",  Ignore,  0 },
+  { ".local",  Ignore,  0 },
+  { ".comm",  Ignore,  0 },
+  { ".uleb128",  Ignore,  0 },
+  { ".cfi_sections",  Ignore,  0 },
+  { ".cfi_sections",  Ignore,  0 },
+  { ".cfi_startproc",  Ignore,  0 },
+  { ".cfi_endproc",  Ignore,  0 },
+    /* single precision floating point instructions */
   { "fadd.s",  formatRF, OP_ADDF  },
   { "fsub.s",  formatRF, OP_SUBF  },
   { "fmul.s",  formatRF, OP_MULF  },
   { "fdiv.s",  formatRF, OP_DIVF  },
   { "fsgnj.s",  formatRF, OP_SGNJF },
+  { "fmv.s",  formatMF, OP_SGNJF },
   { "fsgnjn.s",  formatRF, OP_SGNJNF },
+  { "fneg.s",  formatNF, OP_SGNJNF },
   { "fsgnjx.s",  formatRF, OP_SGNJXF },
   { "fmin.s",  formatRF, OP_MINF  },
   { "fmax.s",  formatRF, OP_MAXF  },
@@ -2282,7 +2464,10 @@ Instr instrTable[] = {
   { "bgt",     formatSB, OP_BGT  },
   { "bgtu",    formatSB, OP_BGTU },
   { "jal",     formatUJ, OP_JAL  },
+  { "j",       formatJ, OP_JAL  },
   { "jalr",    formatJR, OP_JALR  },
+  { "ret",    formatRET, OP_JALR  },
+  { "jr",    formatJ0R, OP_JALR  },
   /* immediate instructions */
   { "addi",    formatIm, OP_ADDI  },
   { "mv",    formatMv, OP_ADDI  },
@@ -2592,10 +2777,14 @@ void writeSymbol(Symbol *s) {
     symRec.type = MSB;
     symRec.value = 0;
     symRec.debug = 0;
+    symRec.debugtype = 0;
+    symRec.debugvalue = 0;
   } else {
     symRec.type = s->segment;
     symRec.value = s->value;
     symRec.debug = s->debug;
+    symRec.debugtype = s->debugtype;
+    symRec.debugvalue = s->debugvalue;
   }
   fwrite(&symRec, sizeof(SymbolRecord), 1, outFile);
   symtblSize += sizeof(SymbolRecord);  

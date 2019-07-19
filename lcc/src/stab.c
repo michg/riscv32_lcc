@@ -273,7 +273,14 @@ void stabtype(Symbol p) {
 }
 
 /* stabend - finalize a function */
-void stabfend(Symbol p, int lineno) {}
+void stabfend(Symbol p, int lineno) {
+    if (isfunc(p->type)) {
+		print("\t.stabs \"%s:%c%d\",%d,0,0,%s\n", p->name,
+			'E', dbxtype(freturn(p->type)),
+			N_FUN, p->x.name);
+		return;
+    }
+}
 
 /* stabend - finalize stab output */
 void stabend(Coordinate *cp, Symbol p, Coordinate **cpp, Symbol *sp, Symbol *stab) {

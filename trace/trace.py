@@ -42,53 +42,53 @@ def load_debug():
         globalmap[glob['name']] = Global(glob['type'],glob['pos'])
         
     global funcmap
-    global funcadr
-    funcadr = []
     funcmap = {}
     funcs = dbg['functions']
-    Func = namedtuple('Func',['rtype','adr'])
+    Func = namedtuple('Func',['rettype','startpos','endpos','stacklocals','reglocals'])
+    Stackvar =  namedtuple('Stackvar',['type','pos'])
+    Regvar =  namedtuple('Regvar',['type','pos'])
+    global funcadrlist
+    funcadrlist = []
     for func in funcs:
-        funcmap[func['funcname']] = Func(func['rtype'],func['pos'])
-        funcadr.append(func['pos'])
+        stacks = func['stacklocals'] + func['stackargs']
+        stackmap = {}
+        
+        for stack in stacks:        
+            stackmap[stack['name']] = Stackvar(stack['type'], stack['pos'])
+        regs = func['reglocals'] + func['regargs']
+        regmap = {}
+        
+        for reg in regs:        
+            regmap[reg['name']] = Regvar(reg['type'], reg['pos'])
+        funcmap[func['funcname']] = Func(func['rettype'],func['startpos'], func['endpos'], stackmap, regmap) 
+        
+        funcadrlist.append(func['startpos'])
     
     global adrmap
+    global linemap
     adrmap = {}
+    linemap = {}
     lines = dbg['locations']
     Line = namedtuple('Line',['filename','row'])
     for line in lines:
+        linemap[line['filename']] = {}
+    for line in lines:
         adrmap[line['pos']] = Line(line['filename'], line['row'])
+        linemap[line['filename']][line['row']] = line['pos']
+        
     
-    global stacklocalmap
-    stacklocalmap = {}
-    slocals = dbg['stacklocals']
-    Slocal = namedtuple('Slocal',['typenr','ofs'])
-    for func in funcmap:
-        stacklocalmap[func] = {}
-    for slocal in slocals:
-        stacklocalmap[slocal['funcname']][slocal['name']] = Slocal(slocal['type'], slocal['pos'])
     
-    global reglocalmap
-    reglocalmap = {}
-    rlocals = dbg['reglocals']
-    Rlocal = namedtuple('Rlocal',['typenr','regnr'])
-    for func in funcmap:
-        reglocalmap[func] = {}
-    for rlocal in rlocals:
-        reglocalmap[rlocal['funcname']][rlocal['name']] = Rlocal(rlocal['type'], rlocal['pos'])
-    f.close() 
-
+    f.close()
+    
 def getfunc(adr):
-    proc = ""
-    min = -1;
+    func = ""
     for key in funcmap:
-        funcadr = funcmap[key].adr
-        if min<0 or adr>=funcadr and adr-funcadr<min:
-            min = adr-funcadr
-            func = key 
+        if ((adr >= funcmap[key].startpos) and (adr<=funcmap[key].endpos)):
+            func = key
     return(func) 
 
 def checkfuncstart(adr):    
-    if adr in funcadr:
+    if adr in funcadrlist:
         return(True)
     else:
         return(False)
