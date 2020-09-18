@@ -629,13 +629,13 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
   usedmask[IREG] &= 0x0FFC0002;
   usedmask[FREG] &= 0x0FFC0000;
   maxargoffset = roundup(maxargoffset, 4);
-  if (ncalls != 0 && maxargoffset < 16) {
+  if (ncalls != 0 && maxargoffset < 24) {
     maxargoffset = 24;
   }
   sizeisave = 4 * bitcount(usedmask[IREG]);
   sizefsave = 4 * bitcount(usedmask[FREG]);
   framesize = roundup(maxoffset, 16);
-  framesizeabs = roundup(maxargoffset + sizeisave + sizefsave, 16) + framesize;
+  framesizeabs = roundup(maxargoffset + sizeisave + sizefsave + 4, 16) + framesize;
   segment(CODE);
   print("\t.align\t4\n");
   print("%s:\n", f->x.name);

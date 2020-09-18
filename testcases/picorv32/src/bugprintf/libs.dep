@@ -1,0 +1,1 @@
+-l ../../lcc/bin/libs/stdio.lib -l ../../lcc/bin/libs/stdlib.lib -l ../../lcc/bin/libs/string.lib -l ../../lcc/bin/libs/ctype.lib -l ../../lcc/bin/libs/math.lib -l ../../lcc/bin/libs/libsoftfloat.lib -l ../../lcc/bin/libs/errno.lib
