@@ -1961,7 +1961,6 @@ void formatCsrr(unsigned int code) {
     getToken();
     expect(TOK_COMMA);
     getToken();
-    getToken();
     expect(TOK_IDENT);
     p = tokenvalString;
     getToken(); 
