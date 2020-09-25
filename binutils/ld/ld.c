@@ -16,12 +16,9 @@
 #include "../include/a.out.h"
 #include "../include/ar.h"
 #include "../include/ranlib.h"
+#include "../include/dbg.h"
 
-#include "set.h"
-#include "atom.h"
-#include "list.h"
 #include "mem.h"
-#include "table.h"
 
 
 /**************************************************************/
@@ -60,11 +57,11 @@ char *mapName = NULL;
 char *inName = NULL;
 char outpath[40];
 char destfile[40];
+char dbgfile[40];
 
 FILE *codeFile = NULL;
 FILE *dataFile = NULL;
 FILE *outFile = NULL;
-FILE *debFile = NULL;
 FILE *JsondebFile = NULL;
 FILE *mapFile = NULL;
 FILE *inFile = NULL;
@@ -199,10 +196,6 @@ void error(char *fmt, ...) {
     fclose(outFile);
     outFile = NULL;
   }
-  if (debFile != NULL) {
-    fclose(debFile);
-    debFile = NULL;
-  }
   if (mapFile != NULL) {
     fclose(mapFile);
     mapFile = NULL;
@@ -285,19 +278,7 @@ void freeMemory(void *p) {
 
 
 Reloc *relocs = NULL;
-Lelem *clist = NULL;
-Lelem *dlist = NULL;
-Set_T undefset;
-Set_T defset;
-Set_T rvcset;
-List_T liblist;
-List_T linelist;
-List_T funclist;
-List_T globallist;
-List_T reglocallist;
-List_T stacklocallist;
-List_T typedeflist;
-Table_T functable;
+
 
 typedef struct linedata {
     char* filename;
@@ -309,48 +290,49 @@ typedef struct funclistdata {
     char* funcname;    
 } *Funclistdata;
 
-typedef struct functabledata {
-    unsigned int startpos;    
-    unsigned int endpos;
-    int rettype;
-    List_T argsreg;
-    List_T localsreg;
-    List_T argsstack;
-    List_T localsstack;
-} *Functabledata;
 
-typedef struct globaldata {    
-    char* name;
-    unsigned int type;
-    unsigned int pos;
-} *Globaldata;
+LIST_DEF(listcstr, const char *, M_CSTR_OPLIST)
+DICT_SET_DEF(setcstr, const char*, M_CSTR_OPLIST)
+RBTREE_DEF(rbtuint, unsigned int)
+ 
+listcstr_t liblist;
+setcstr_t defset;
+setcstr_t undefset;
+setcstr_it_t itr;
+rbtuint_t rvctree;
+rbtuint_it_t rbtitr;
 
-typedef struct reglocaldata {        
-    char* name;
-    unsigned int type;
-    unsigned int pos;
-} *Reglocaldata;
+loc_t loc;
+func_t  *funcptr;
+string_t funckey; 
+global_t glob;
+typdef_t typdef;
+funcvar_t funcvar;
+root_t root;
+m_serial_read_t  in;
+m_serial_write_t out;
+m_serial_return_code_t ret;
 
-typedef struct stacklocaldata {        
-    char* name;
-    unsigned int type;
-    unsigned int pos;
-} *Stacklocaldata;
 
-typedef struct typedefdata {        
-    char* name;
-    unsigned int number;
-    char* desc;
-} *Typedefdata;
+void mlibinit() {
+    loc_init(loc);
+    funcvar_init(funcvar);
+    string_init(funckey);
+    global_init(glob);
+    typdef_init(typdef);
+    root_init(root);
 
-void **linearray;
-void **funcarray;
-void **globalarray;
-void **stacklocalarray;
-void **argsarray;
-void **reglocalarray;
-void **typedefarray;
-void **rvcarray;
+}
+
+void mlibclear() {
+    loc_clear(loc);
+    funcvar_clear(funcvar);
+    global_clear(glob);
+    typdef_clear(typdef);
+    string_clear(funckey);
+    root_clear(root);
+    listcstr_clear(liblist);
+}
 
 
 void addReloc(int segment, RelocRecord *relRec, Symbol **symMap) {
@@ -434,7 +416,7 @@ void foreachLelem(Lelem *list, void op(Lelem *x)) {
 
 int getmaxpos2(int number) {
  int i=0;
- while((i<Set_length(rvcset)) && (number > *(unsigned int*)rvcarray[i])) i++;
+ for (rbtuint_it(rbtitr, rvctree) ; !rbtuint_it_until_p(rbtitr, number); rbtuint_next(rbtitr)) i++;
  return(i);
 }
 
@@ -629,7 +611,7 @@ void fixupRef(Reloc *rel, int scan) {
   if(rvcmatch && scan==1) {
    NEW(rvcadr);   
    *rvcadr = (rel->offset)+2;
-   Set_put(rvcset, rvcadr);     
+   rbtuint_push(rvctree, *rvcadr);
   }
   /* output debugging info */
   if (debugFixup) {
@@ -660,8 +642,9 @@ void relocateSegments(void) {
     fixupRef(rel, 1);
     rel = rel->next;
   }
-    rvcarray = Set_toArray(rvcset, NULL);
-    qsort(rvcarray, Set_length(rvcset), sizeof (*rvcarray),  cmpint2);    
+    //rvcarray = Set_toArray(rvcset, NULL);
+    //qsort(rvcarray, Set_length(rvcset), sizeof (*rvcarray),  cmpint2);
+    //arruint_special_sort(rvcarray);   
   
   updatesymbols();
   while (relocs != NULL) {
@@ -892,6 +875,7 @@ void readSymbols(void) {
   SymbolRecord symRec;
   char strBuf[MAX_STRLEN];
   Symbol *sym;
+  char *tmp;
 
   if (fseek(inFile, SYMTBL_START(inHeader), SEEK_SET) < 0) {
     error("cannot seek to symbol table section");
@@ -916,10 +900,12 @@ void readSymbols(void) {
         /* and this module's segment start of the symbol's segment */
         sym->type = symRec.type;
         sym->value = symRec.value + segPtr[symRec.type];        
-        Set_put(defset, Atom_string(strBuf));       
+        tmp = strdup(strBuf);
+        setcstr_push(defset, tmp);
       }
     } else {            
-      Set_put(undefset, Atom_string(strBuf));     
+      tmp = strdup(strBuf);
+      setcstr_push(undefset, tmp);
       /* the symbol is undefined in this symbol record */
       /* nothing to do here: lookupEnter already entered */
       /* the symbol into the symbol table, if necessary */
@@ -1000,126 +986,42 @@ void printliststring(Lelem* x) {
 }
 
 void printdebSymbol(Symbol *s) {  
-  Linedata line;
-  Funclistdata func;
-  Functabledata funcdata;
-  Globaldata global;
-  Reglocaldata reglocal;
-  Stacklocaldata stacklocal;
-  Typedefdata typedefine; 
   int sep;
-  char *str, *str2, *funcname, *name;
+  char *ptr;
   unsigned int val;
+  Symbol *sym;
+  char *tmp;
+  char strtmp[80];
   switch (s->debug) {
     /* debug symbol */
-    case DBG_LINE: fprintf(debFile, "line: %s @ 0x%08X\n", s->name, s->value+segStart[s->type]);
-                   NEW(line);
-                   sep = strcspn(s->name, ":");
-                   line->filename = strndup(s->name, sep);
-                   line->row = strndup(s->name + sep + 1, strlen(s->name) - strlen(line->filename) - 1);
-                   line->pos = s->value+segStart[s->type];
-                   linelist = List_push(linelist, (void *)line);                   
+    case DBG_LINE: sep = strcspn(s->name, ":");
+                   tmp = strndup(s->name, sep);
+                   string_set_str(loc->filename, tmp);
+                   loc->pos = s->value+segStart[s->type];
+                   loc->row = strtol(s->name + sep + 1, &ptr, 10);
+                   locarr_push_back(root->locations, loc); 
                    break;    
-    case DBG_FUNCBEG:
-                   NEW(func);
-                   NEW(funcdata);                   
-                   sep = strcspn(s->name, " ");
-                   func->funcname = strndup(s->name, sep);                                      
-                   fprintf(debFile, "funcstart: %s @ 0x%08X\n", func->funcname, roundup(s->value+segStart[s->type], FUNCALIGN));                   
-                   funclist = List_push(funclist, (void *)func);
-                   funcdata->startpos = roundup(s->value+segStart[s->type], FUNCALIGN);        
-                   funcdata->argsstack = NULL;
-                   funcdata->argsreg = NULL;
-                   funcdata->localsreg = NULL;
-                   funcdata->localsstack = NULL;
-                   Table_put(functable, Atom_string(func->funcname), funcdata);
-                   break;
-    case DBG_FUNCEND:
-                   sep = strcspn(s->name, " ");
-                   str = strndup(s->name, sep);                                      
-                   fprintf(debFile, "funcend: %s @ 0x%08X\n", str, roundup(s->value+segStart[s->type], FUNCALIGN));                        
-                   funcdata = Table_get(functable, Atom_string(str));
-                   assert(funcdata);
-                   funcdata->endpos = roundup(s->value+segStart[s->type], FUNCALIGN);
-                   break;
-    case DBG_FUNCRET:                   
-                   str = strdup(s->name);
-                   name = strtok(str, " ");
-                   strtok(NULL, " ");                   
+    case DBG_FUNCBEG:sep = strcspn(s->name, " ");
+                   tmp = strndup(s->name, sep);
+                   string_set_str(funckey, tmp);
+                   funcptr = funcdict_get(root->functions, funckey);
+                   sym = lookup(symbolTable, tmp);
+                   (*funcptr)->startpos = roundup(sym->value+segStart[sym->type], FUNCALIGN);
                    val = s->debugtype;
-                   fprintf(debFile, "funcret: %s %d\n", name, val);                        
-                   funcdata = Table_get(functable, Atom_string(str));
-                   assert(funcdata);
-                   funcdata->rettype = val;
+                   strcpy(strtmp, tmp);
+                   strcat(strtmp,"_end");
+                   sym = lookup(symbolTable, strtmp);
+                   if (sym == NULL) { error("Can't find:%s\n",strtmp);}
+                   (*funcptr)->endpos = roundup(sym->value+segStart[sym->type], FUNCALIGN);
                    break;
-    case DBG_FUNCARGREG:
-                   fprintf(debFile, "%s\n", s->name); // reglocal or regparam
-                   NEW(reglocal);
-                   str = strdup(s->name);
-                   strtok(str," ");
-                   funcname = strtok(NULL, ":");
-                   reglocal->name = strtok(NULL, " ");                   
-                   reglocal->type = s->debugtype;
-                   reglocal->pos = s->debugvalue;
-                   funcdata = Table_get(functable, Atom_string(funcname));
-                   assert(funcdata);
-                   funcdata->argsreg = List_push(funcdata->argsreg, (void *)reglocal);                   
+  case DBG_VARGLO: sep = strcspn(s->name, " ");
+                   tmp = strndup(s->name, sep);
+                   sym = lookup(symbolTable, tmp);
+                   string_set_str(glob->name, tmp);
+                   glob->type = s->debugtype;
+                   glob->pos = segStart[sym->type] + sym->value - sym->rvcdelta;
+                   globarr_push_back(root->globals, glob); 
                    break;
-    case DBG_FUNCARGSTACK: fprintf(debFile, "%s\n", s->name);      //local or locparam
-                          NEW(stacklocal);
-                          str = strdup(s->name);
-                          strtok(str," ");
-                          funcname = strtok(NULL, ":");
-                          stacklocal->name = strtok(NULL, " ");
-                          stacklocal->type = s->debugtype;
-                          stacklocal->pos = s->debugvalue;
-                          funcdata = Table_get(functable, Atom_string(funcname));
-                          assert(funcdata);
-                          funcdata->argsstack = List_push(funcdata->argsstack, (void *)stacklocal);                                                        
-                          break;
-    case DBG_VARGLO: fprintf(debFile, "global: %s @ 0x%08X\n", s->name, s->value+segStart[s->type]);
-                   NEW(global);
-                   sep = strcspn(s->name, " ");
-                   global->name = strndup(s->name, sep);
-                   global->type = s->debugtype;
-                   global->pos = s->value+segStart[s->type];
-                   globallist = List_push(globallist, (void *)global);                   
-                   break;
-    case DBG_VARLOCSTACK: fprintf(debFile, "%s\n", s->name);      //local or locparam
-                          NEW(stacklocal);
-                          str = strdup(s->name);
-                          strtok(str," ");
-                          funcname = strtok(NULL, ":");
-                          stacklocal->name = strtok(NULL, " ");
-                          stacklocal->type = s->debugtype;
-                          stacklocal->pos = s->debugvalue;
-                          funcdata = Table_get(functable, Atom_string(funcname));
-                          assert(funcdata);
-                          funcdata->localsstack = List_push(funcdata->localsstack, (void *)stacklocal);
-                          break;
-    case DBG_VARLOCREG: fprintf(debFile, "%s\n", s->name); // reglocal or regparam
-                        NEW(reglocal);
-                          str = strdup(s->name);
-                          strtok(str," ");
-                          funcname = strtok(NULL, ":");
-                          reglocal->name = strtok(NULL, " ");
-                          reglocal->type = s->debugtype;
-                          reglocal->pos = s->debugvalue;
-                          funcdata = Table_get(functable, Atom_string(funcname));
-                          assert(funcdata);
-                          funcdata->localsreg = List_push(funcdata->localsreg, (void *)reglocal);                           
-                        break;
-    case DBG_TYPEDEF: fprintf(debFile, "%s\n", s->name); // typedef
-                        NEW(typedefine);
-                        str = strdup(s->name);
-                        strsep(&str,"#");
-                        typedefine->name = strsep(&str, ":");
-                        str2int(strsep(&str,"#"), &val); 
-                        typedefine->number = val;                        
-                        typedefine->desc = strsep(&str, " ");
-                        typedeflist = List_push(typedeflist, (void *)typedefine); 
-                      break;
-    default: break;
   }
 }
 
@@ -1166,7 +1068,7 @@ void writeCode(void) {
       break;
     }
 
-    if(!Set_member(rvcset, &pos))       
+    if(!rbtuint_get(rvctree, pos))
      fputc(data, outFile);   
     else { 
      data = fgetc(codeFile);
@@ -1347,23 +1249,22 @@ void usage(char *myself) {
 
 
 int main(int argc, char *argv[]) {
-  int i,j, len;
+  int i;
   char *argp;
-  char* dot;
   unsigned int *ssp;
   int *ssdp;  
   Symbol *Sym;
   char *tmp;  
-  undefset = Set_new(0, NULL, NULL); 
-  defset = Set_new(0, NULL, NULL);  
-  rvcset =  Set_new(0, intcmp, inthash); 
-  functable =  Table_new(0, NULL, NULL); 
   tmpnam(codeName);
   tmpnam(dataName);
   char *outName = "a.out";
   struct stat buf;
-  Functabledata funcdata;
+
   
+  listcstr_init(liblist);
+  rbtuint_init(rvctree);
+  setcstr_init(defset);
+  setcstr_init(undefset);
   for (i = 1; i < argc; i++) {
     argp = argv[i];
     if (*argp != '-') {
@@ -1388,7 +1289,7 @@ int main(int argc, char *argv[]) {
           usage(argv[0]);
         }
         libName = strdup(argv[++i]);        
-        liblist = List_push(liblist,libName);        
+        listcstr_push_back(liblist, libName);
         break;
       case 'm':
         if (i == argc - 1) {
@@ -1449,13 +1350,19 @@ int main(int argc, char *argv[]) {
   strcpy(outpath, tmp);
   strcat(outpath,"/");    
   if(withDebug) {
-    strcpy(debName,outName);    
-    dot = strrchr(debName, '.');    
-    strcpy(dot, ".deb");    
-    debFile = fopen(debName, "wt");
-    if (debFile == NULL) {
-      error("cannot open debug file '%s'", debName);
-    }
+    mlibinit();
+    strcpy(dbgfile,outpath);
+    strcat(dbgfile,"as.dbg");
+    JsondebFile = m_core_fopen (dbgfile, "rt");
+    if (!JsondebFile) abort();
+    m_serial_json_read_init(in, JsondebFile);
+    ret = root_in_serial(root, in);
+    fclose(JsondebFile);
+    strcpy(dbgfile,outpath);
+    strcat(dbgfile,"ld.dbg");
+    JsondebFile = m_core_fopen (dbgfile, "wt");
+    if (!JsondebFile) abort();
+    m_serial_json_write_init(out, JsondebFile); 
   }
   if (mapName != NULL) {
     mapFile = fopen(mapName, "wt");
@@ -1482,26 +1389,28 @@ int main(int argc, char *argv[]) {
 
   
    
-  liblist = List_push(liblist, NULL);
-  liblist = List_reverse(liblist);
-  liblist = List_pop(liblist, (void **)&libName);  
+  listcstr_reverse(liblist);
+  if(liblist[0]) listcstr_pop_back(&libName, liblist);
   while(libName) {
       printf("Using Library:%s\r\n",libName);
-      void **lines = Set_toArray(defset, NULL);
-      for (i = 0; lines[i]; i++) Set_remove(undefset, Atom_string(lines[i]));      
-      free(lines);  
-      lines = Set_toArray(undefset, NULL);
-      readlibsymbols(libName);      
+      for (setcstr_it(itr, defset) ; !setcstr_end_p(itr); setcstr_next(itr)) {
+       char *element = *setcstr_ref(itr);
+       setcstr_erase(undefset, element);
+      } 
+      readlibsymbols(libName);
       printf("Resolving:\r\n");      
-      for (i = 0; lines[i]; i++) {    
-          Sym = lookup(libsymbolTable, lines[i]);
+      restart:
+      for (setcstr_it(itr, undefset) ; !setcstr_end_p(itr); setcstr_next(itr)) {
+          char *element = *setcstr_ref(itr);
+          Sym = lookup(libsymbolTable, element);
           if(Sym) {            
             strcpy(destfile, outpath);
             strcat(destfile, Sym->filename);            
           }
+        
           if(Sym && stat(destfile, &buf)!=0) {
               printf("Extracting %s for %s from archive %s\r\n", Sym->filename, Sym->name, libName);              
-              Set_remove(undefset, Atom_string(Sym->name));
+              setcstr_erase(undefset, Sym->name);
               extractfilefromlib(libName, Sym->filename);              
               inFile = fopen(destfile, "rb");
               if (inFile == NULL) {
@@ -1513,13 +1422,11 @@ int main(int argc, char *argv[]) {
                 fclose(inFile);                
                 inFile = NULL;
               }          
-             FREE(lines);
-             lines = Set_toArray(undefset, NULL);            
-             i = -1;
+             goto restart;
           }
       }   
-      FREE(lines);
-  liblist = List_pop(liblist, (void **)&libName);
+  libName = NULL;
+  if(liblist[0]) listcstr_pop_back(&libName, liblist);
   }
   fprintf(stderr, "Linking modules...\n");
   linkSymbols();
@@ -1531,102 +1438,15 @@ int main(int argc, char *argv[]) {
   if (mapFile != NULL) {
     printToMapFile();
   }
-  if (debFile != NULL) {    
+  if (JsondebFile != NULL) {    
     printToDebFile();
-    
-    JsondebFile = fopen("dbg.json", "w");
-    linearray = List_toArray(linelist, NULL);    
-    fprintf(JsondebFile,"{\n  \"locations\": [\n");
-    for(i=0;i<List_length(linelist);i++) {
-        fprintf(JsondebFile,"    {\n    \"filename\":%s,\n    \"row\":%s,\n    \"pos\":%d\n    }",
-        ((Linedata)linearray[i])->filename,((Linedata)linearray[i])->row,((Linedata)linearray[i])->pos);
-        if(i!=(List_length(linelist)-1)) fprintf(JsondebFile,",");
-        fprintf(JsondebFile,"\n");
-        
-    }
-    
-    fprintf(JsondebFile,"  ],\n");
-    
-    funcarray = List_toArray(funclist, NULL); 
-    fprintf(JsondebFile,"  \"functions\": [\n");
-    
-    for(i=0;i<List_length(funclist);i++) {
-        funcdata = Table_get(functable, Atom_string(((Funclistdata)funcarray[i])->funcname)); 
-        fprintf(JsondebFile,"    {\n    \"funcname\":\"%s\",\n    \"startpos\":%d,\n    \"endpos\":%d,\n    \"rettype\":%d,\n",
-        ((Funclistdata)funcarray[i])->funcname, funcdata->startpos, funcdata->endpos, funcdata->rettype);        
-        
-        stacklocalarray = List_toArray(funcdata->localsstack, NULL);
-        len = List_length(funcdata->localsstack);
-        fprintf(JsondebFile,"    \"stacklocals\": [\n");        
-        for(j=0;j<len;j++) {
-            fprintf(JsondebFile,"      {\n      \"name\":\"%s\",\n      \"type\":%d,\n      \"pos\":%d\n      }",
-            ((Stacklocaldata)stacklocalarray[j])->name,((Stacklocaldata)stacklocalarray[j])->type,((Stacklocaldata)stacklocalarray[j])->pos);
-            if(j!=(len-1)) fprintf(JsondebFile,",");
-            fprintf(JsondebFile,"\n");
-        }
-        fprintf(JsondebFile,"    ],\n");
-        
-        argsarray = List_toArray(funcdata->argsstack, NULL);
-        len = List_length(funcdata->argsstack);
-        fprintf(JsondebFile,"    \"stackargs\": [\n");        
-        for(j=0;j<len;j++) {
-            fprintf(JsondebFile,"      {\n      \"name\":\"%s\",\n      \"type\":%d,\n      \"pos\":%d\n      }",
-            ((Stacklocaldata)argsarray[j])->name,((Stacklocaldata)argsarray[j])->type,((Stacklocaldata)argsarray[j])->pos);
-            if(j!=(len-1)) fprintf(JsondebFile,",");
-            fprintf(JsondebFile,"\n");
-        }
-        fprintf(JsondebFile,"    ],\n");
-        
-        reglocalarray = List_toArray(funcdata->localsreg, NULL);
-        fprintf(JsondebFile,"    \"reglocals\": [\n");
-        len = List_length(funcdata->localsreg);
-        for(j=0;j<len;j++) {
-            fprintf(JsondebFile,"      {\n      \"name\":\"%s\",\n      \"type\":%d,\n      \"pos\":%d\n      }",
-            ((Reglocaldata)reglocalarray[j])->name,((Reglocaldata)reglocalarray[j])->type,((Reglocaldata)reglocalarray[j])->pos);
-            if(j!=(len-1)) fprintf(JsondebFile,",");
-            fprintf(JsondebFile,"\n");
-        }
-        fprintf(JsondebFile,"    ],\n");
-        
-        argsarray = List_toArray(funcdata->argsreg, NULL);
-        fprintf(JsondebFile,"    \"regargs\": [\n");
-        len = List_length(funcdata->argsreg);
-        for(j=0;j<len;j++) {
-            fprintf(JsondebFile,"      {\n      \"name\":\"%s\",\n      \"type\":%d,\n      \"pos\":%d\n      }",
-            ((Reglocaldata)argsarray[j])->name,((Reglocaldata)argsarray[j])->type,((Reglocaldata)argsarray[j])->pos);
-            if(j!=(len-1)) fprintf(JsondebFile,",");
-            fprintf(JsondebFile,"\n");
-        }
-        fprintf(JsondebFile,"    ]\n");
-        fprintf(JsondebFile,"    }");
-        if(i!=(List_length(funclist)-1)) fprintf(JsondebFile,",");
-        fprintf(JsondebFile,"\n");
-    }
-    fprintf(JsondebFile,"  ],\n");
-    globalarray = List_toArray(globallist, NULL);
-    fprintf(JsondebFile,"  \"globals\": [\n");
-    for(i=0;i<List_length(globallist);i++) {
-        fprintf(JsondebFile,"    {\n    \"name\":\"%s\",\n    \"type\":%d,\n    \"pos\":%d\n    }",
-        ((Globaldata)globalarray[i])->name,((Globaldata)globalarray[i])->type,((Globaldata)globalarray[i])->pos);
-        if(i!=(List_length(globallist)-1)) fprintf(JsondebFile,",");
-        fprintf(JsondebFile,"\n");
-    }
-    fprintf(JsondebFile,"  ],\n");
-    
-    
-    typedefarray = List_toArray(typedeflist, NULL);
-    fprintf(JsondebFile,"  \"typedefs\": [\n");
-    for(i=0;i<List_length(typedeflist)-1;i++) {
-        fprintf(JsondebFile,"    {\n    \"name\":\"%s\",\n    \"number\":%d,\n    \"desc\":\"%s\"\n    },\n",
-        ((Typedefdata)typedefarray[i])->name,((Typedefdata)typedefarray[i])->number,((Typedefdata)typedefarray[i])->desc);
-    }
-    fprintf(JsondebFile,"    {\n    \"name\":\"%s\",\n    \"number\":%d,\n    \"desc\":\"%s\"\n    }\n",
-        ((Typedefdata)typedefarray[i])->name,((Typedefdata)typedefarray[i])->number,((Typedefdata)typedefarray[i])->desc);   
-    fprintf(JsondebFile,"  ]\n");
-    
-    fprintf(JsondebFile,"}");
+    ret = root_out_serial(out, root);
+    assert (ret == M_SERIAL_OK_DONE);
+    m_serial_json_write_clear(out); 
+    mlibclear();
     fclose(JsondebFile);
   }
+  rbtuint_clear(rvctree);
   if (codeFile != NULL) {
     fclose(codeFile);
     codeFile = NULL;

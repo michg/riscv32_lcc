@@ -5,11 +5,11 @@
 BUILD = ..
 
 CC = gcc
-CFLAGS = -g -Wall
+CFLAGS = -g -Wall -I../mlib
 LDFLAGS = -g
 LDLIBS = -lm
 
-SRCS = ld.c set.c atom.c list.c table.c
+SRCS = ld.c
 OBJS = $(patsubst %.c,%.o,$(SRCS))
 BIN = ld
 

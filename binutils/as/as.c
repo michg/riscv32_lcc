@@ -9,66 +9,68 @@
 #include <stdarg.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <libgen.h> 
 
 #include "../include/a.out.h"
+#include "../include/dbg.h"
 #include "stab.h"
 
 
 /**************************************************************/
 
 
-#define NUM_REGS	32
-#define AUX_REG		1
+#define NUM_REGS    32
+#define AUX_REG     1
 
-#define LINE_SIZE	600
+#define LINE_SIZE   600
 
-#define TOK_EOL		0
-#define TOK_LABEL	1
-#define TOK_IDENT	2
-#define TOK_STRING	3
-#define TOK_NUMBER	4
-#define TOK_IREGISTER	5
+#define TOK_EOL     0
+#define TOK_LABEL   1
+#define TOK_IDENT   2
+#define TOK_STRING  3
+#define TOK_NUMBER  4
+#define TOK_IREGISTER   5
 
-#define TOK_PLUS	6
-#define TOK_MINUS	7
-#define TOK_STAR	8
-#define TOK_SLASH	9
-#define TOK_PERCENT	10
-#define TOK_LSHIFT	11
-#define TOK_RSHIFT	12
-#define TOK_LPAREN	13
-#define TOK_RPAREN	14
-#define TOK_COMMA	15
-#define TOK_TILDE	16
-#define TOK_AMPER	17
-#define TOK_BAR		18
-#define TOK_CARET	19
-#define TOK_DOTRELADR 	20
-#define TOK_FREGISTER	21
-#define TOK_ADD	22
+#define TOK_PLUS    6
+#define TOK_MINUS   7
+#define TOK_STAR    8
+#define TOK_SLASH   9
+#define TOK_PERCENT 10
+#define TOK_LSHIFT  11
+#define TOK_RSHIFT  12
+#define TOK_LPAREN  13
+#define TOK_RPAREN  14
+#define TOK_COMMA   15
+#define TOK_TILDE   16
+#define TOK_AMPER   17
+#define TOK_BAR     18
+#define TOK_CARET   19
+#define TOK_DOTRELADR   20
+#define TOK_FREGISTER   21
+#define TOK_ADD 22
 
 
-#define STATUS_UNKNOWN	0	/* symbol is not yet defined */
-#define STATUS_DEFINED	1	/* symbol is defined */
-#define STATUS_GLOBREF	2	/* local entry refers to a global one */
+#define STATUS_UNKNOWN  0   /* symbol is not yet defined */
+#define STATUS_DEFINED  1   /* symbol is defined */
+#define STATUS_GLOBREF  2   /* local entry refers to a global one */
 
-#define GLOBAL_TABLE	0	/* global symbol table identifier */
-#define LOCAL_TABLE	1	/* local symbol table identifier */
+#define GLOBAL_TABLE    0   /* global symbol table identifier */
+#define LOCAL_TABLE 1   /* local symbol table identifier */
 
-#define MSB	((unsigned int) 1 << (sizeof(unsigned int) * 8 - 1))
+#define MSB ((unsigned int) 1 << (sizeof(unsigned int) * 8 - 1))
 
 
 /**************************************************************/
 
 
 
-#define OP_ADDF		0x007
-#define OP_SUBF		0x047
-#define OP_MULF		0x087
-#define OP_DIVF		0x0C7
-#define OP_SGNJF	0x100
-#define OP_SGNJNF	0x101
-#define OP_SGNJXF	0x102
+#define OP_ADDF     0x007
+#define OP_SUBF     0x047
+#define OP_MULF     0x087
+#define OP_DIVF     0x0C7
+#define OP_SGNJF    0x100
+#define OP_SGNJNF   0x101
+#define OP_SGNJXF   0x102
 #define OP_SQRTF    0x2C7
 #define OP_MVSXF    0x780
 #define OP_MVXSF    0x700
@@ -76,69 +78,69 @@
 #define OP_CVTSWUF    0x68F
 #define OP_CVTWSF    0x607
 #define OP_CVTWUSF    0x60F
-#define OP_EQF		0x502
-#define OP_EQF		0x502
-#define OP_LTF		0x501
-#define OP_LEF		0x500
+#define OP_EQF      0x502
+#define OP_EQF      0x502
+#define OP_LTF      0x501
+#define OP_LEF      0x500
 
 #define OP_MINF     0x140
 #define OP_MAXF     0x141
-#define OP_LWF		0x20
-#define OP_SWF		0x2
+#define OP_LWF      0x20
+#define OP_SWF      0x2
 
-#define OP_ADD		0x000
-#define OP_SUB		0x100
-#define OP_SLL		0x001
-#define OP_SRL		0x005
-#define OP_SRA		0x105
-#define OP_AND		0x007
-#define OP_OR		0x006
-#define OP_XOR		0x004
-#define OP_BEQ		0x0
-#define OP_BNE		0x1
-#define OP_SLT		0x2
-#define OP_SLTU		0x3
-#define OP_BLT		0x4
-#define OP_BGT		0x14
-#define OP_BGE		0x5
-#define OP_BLE		0x15
-#define OP_BLTU		0x6
-#define OP_BGTU		0x16
-#define OP_BGEU		0x7
-#define OP_BLEU		0x17
-#define OP_ADDI		0x0
+#define OP_ADD      0x000
+#define OP_SUB      0x100
+#define OP_SLL      0x001
+#define OP_SRL      0x005
+#define OP_SRA      0x105
+#define OP_AND      0x007
+#define OP_OR       0x006
+#define OP_XOR      0x004
+#define OP_BEQ      0x0
+#define OP_BNE      0x1
+#define OP_SLT      0x2
+#define OP_SLTU     0x3
+#define OP_BLT      0x4
+#define OP_BGT      0x14
+#define OP_BGE      0x5
+#define OP_BLE      0x15
+#define OP_BLTU     0x6
+#define OP_BGTU     0x16
+#define OP_BGEU     0x7
+#define OP_BLEU     0x17
+#define OP_ADDI     0x0
 #define OP_SLLI         0x1
-#define OP_NOP		0x8
-#define OP_ANDI		0x7
-#define OP_ORI		0x6
-#define OP_XORI		0x4
-#define OP_SLTI		0x2
+#define OP_NOP      0x8
+#define OP_ANDI     0x7
+#define OP_ORI      0x6
+#define OP_XORI     0x4
+#define OP_SLTI     0x2
 #define OP_SLTIU        0x3
 //#define OP_SLLI         0x001
 #define OP_SRLI         0x005
 #define OP_SRAI         0x105
-#define OP_CSRW		0x1
-#define OP_CSRS		0x2
-#define OP_CSRR		0x2
-#define OP_CSRWI	0x5
-#define OP_CSRSI	0x6
-#define OP_CSRCI	0x7
-#define OP_LB		0x00
-#define OP_LH		0x10
-#define OP_LW		0x20
-#define OP_LBU		0x40
-#define OP_LHU		0x50
-#define OP_LA		0x02
-#define OP_LUI		0x0
-#define OP_SB		0x0
-#define OP_SH		0x1
-#define OP_SW		0x2
-#define OP_JAL		0x0
-#define OP_JALR		0x0
-#define OP_BRK		0x1
-#define OP_MRET		0x302
-#define OP_MUL		0x008
-#define OP_MULH		0x009
+#define OP_CSRW     0x1
+#define OP_CSRS     0x2
+#define OP_CSRR     0x2
+#define OP_CSRWI    0x5
+#define OP_CSRSI    0x6
+#define OP_CSRCI    0x7
+#define OP_LB       0x00
+#define OP_LH       0x10
+#define OP_LW       0x20
+#define OP_LBU      0x40
+#define OP_LHU      0x50
+#define OP_LA       0x02
+#define OP_LUI      0x0
+#define OP_SB       0x0
+#define OP_SH       0x1
+#define OP_SW       0x2
+#define OP_JAL      0x0
+#define OP_JALR     0x0
+#define OP_BRK      0x1
+#define OP_MRET     0x302
+#define OP_MUL      0x008
+#define OP_MULH     0x009
 #define OP_MULHSU       0x00A
 #define OP_MULHU        0x00B
 #define OP_DIV          0x00C
@@ -167,6 +169,8 @@ char dataName[L_tmpnam];
 char srcfileName[L_tmpnam];
 char *outName = NULL;
 char *inName = NULL;
+char outpath[40];
+char dbgfile[40];
 
 FILE *codeFile = NULL;
 FILE *dataFile = NULL;
@@ -193,34 +197,65 @@ char *methodName[6] = { "W32" , "R12" , "RL12" , "RH20", "RS12","J20" };
 
 
 typedef struct fixup {
-  int segment;			/* in which segment */
-  unsigned int offset;		/* at which offset */
-  int method;			/* what kind of coding method is to be used */
-  int value;			/* known part of value */
-  int base;			/* segment which this ref is relative to */
-				/* valid only when used for relocation */
-  struct fixup *next;		/* next fixup */
+  int segment;          /* in which segment */
+  unsigned int offset;      /* at which offset */
+  int method;           /* what kind of coding method is to be used */
+  int value;            /* known part of value */
+  int base;         /* segment which this ref is relative to */
+                /* valid only when used for relocation */
+  struct fixup *next;       /* next fixup */
 } Fixup;
 
 #define symbolmaxnamelen 256
 
 
 typedef struct symbol {
-  char *name;			/* name of symbol */
-  int status;			/* status of symbol */
-  int segment;			/* the symbol's segment */
-  int value;			/* the symbol's value */
-  Fixup *fixups;		/* list of locations to fix */
-  struct symbol *globref;	/* set if this local refers to a global */
-  struct symbol *left;		/* left son in binary search tree */
-  struct symbol *right;		/* right son in binary search tree */
-  int skip;	                /* this symbol is not defined here nor is */
+  char *name;           /* name of symbol */
+  int status;           /* status of symbol */
+  int segment;          /* the symbol's segment */
+  int value;            /* the symbol's value */
+  Fixup *fixups;        /* list of locations to fix */
+  struct symbol *globref;   /* set if this local refers to a global */
+  struct symbol *left;      /* left son in binary search tree */
+  struct symbol *right;     /* right son in binary search tree */
+  int skip;                 /* this symbol is not defined here nor is */
                                 /* it used here: don't write to object file */
   int debug;
   int debugtype;
   int debugvalue;
 } Symbol;
 
+loc_t loc;
+func_t func;
+string_t funckey;
+global_t glob;
+typdef_t typdef;
+funcvar_t funcvar;
+root_t root;
+m_serial_read_t  in;
+m_serial_write_t out;
+m_serial_return_code_t ret;
+FILE *f;
+
+void mlibinit() {
+    loc_init(loc);
+    funcvar_init(funcvar);
+    func_init(func);
+	string_init(funckey);
+    global_init(glob);
+    typdef_init(typdef);
+    root_init(root);
+}
+
+void mlibclear() {
+    loc_clear(loc);
+    funcvar_clear(funcvar);
+    func_clear(func);
+	string_clear(funckey);
+    global_clear(glob);
+    typdef_clear(typdef);
+    root_clear(root);
+} 
 
 int str2int(char *p, unsigned int *num) {
     *num = 0;
@@ -556,7 +591,7 @@ void showToken(void) {
     case TOK_IREGISTER:
       printf("token = TOK_IREGISTER, value = %d\n", tokenvalNumber);
       break;
-	 case TOK_FREGISTER:
+     case TOK_FREGISTER:
       printf("token = TOK_FREGISTER, value = %d\n", tokenvalNumber);
       break;
     case TOK_PLUS:
@@ -931,7 +966,7 @@ Value parsePrimaryExpression(void) {
 
   if (token == TOK_NUMBER) {
     v.con = tokenvalNumber & 0xFFFFFFFF;
-	v.lcon = tokenvalNumber;
+    v.lcon = tokenvalNumber;
     v.sym = NULL;
     getToken();
   } else
@@ -1168,12 +1203,12 @@ void dotBss(unsigned int code) {
 }
 
 void Ignore(unsigned int code) {
-	 while(token != TOK_EOL) getToken();
+     while(token != TOK_EOL) getToken();
 }
 
 void dotStabs(unsigned int code) {
   Value v;
-  unsigned int i, typenum, semicol, n;
+  unsigned int i, typenum, semicol;
   char *ptr, *def, *name;
   char ch;
   Symbol *label, *local;
@@ -1188,14 +1223,10 @@ void dotStabs(unsigned int code) {
   def = strchr(tmpstring, '=');
   if(def) {
     str2int(tmpstring + semicol + 2, &typenum);    
-    n = sprintf(debuglabel,"typedef: #%s:%d#%s", name, typenum, def);
-    label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
-    label->status = STATUS_DEFINED;
-    label->segment = currSeg;
-    label->value = segPtr[currSeg];
-    label->debug = DBG_TYPEDEF;
-    label->debugtype = 0;
-    label->debugvalue = 0;
+    string_set_str(typdef->name, name);
+    typdef->number = typenum;
+    string_set_str(typdef->desc, def);
+    typdefarr_push_back(root->typdefs, typdef); 
     
   } else {
   }
@@ -1225,9 +1256,13 @@ void dotStabs(unsigned int code) {
             label->debug = DBG_VARGLO;
             ptr+=2;
             label->debugvalue = 0;
+            str2int(ptr, &i);
+            sprintf(label->name+strlen(label->name),"%d",i); 
+            label->debugtype = i;
             break; 
-  case 'f':
-  case 'F': n=sprintf(debuglabel,"%s beg",name);
+  case 'f': return;
+            break;
+  case 'F': sprintf(debuglabel,"%s beg",name);
             strcpy(funcname,name);
             label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
             label->status = STATUS_DEFINED;
@@ -1235,76 +1270,43 @@ void dotStabs(unsigned int code) {
             label->value = segPtr[currSeg];            
             label->debug = DBG_FUNCBEG;
             ptr+=2;            
-            n = sprintf(debuglabel,"%s ret",name);
-            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
-            label->status = STATUS_DEFINED;
-            label->segment = currSeg;
-            label->value = segPtr[currSeg];            
-            label->debug = DBG_FUNCRET;
             str2int(ptr, &i);
             label->debugtype = i;
+            string_set_str(funckey, name);
+            func->rettype = i;
             return;
             break;    
-  case 'E': n=sprintf(debuglabel,"%s end",name);
-            strcpy(funcname,name);
-            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
-            label->status = STATUS_DEFINED;
-            label->segment = currSeg;
-            label->value = segPtr[currSeg];            
-            label->debug = DBG_FUNCEND;
-            ptr+=2;
+ case 'E':  funcdict_set_at(root->functions, funckey, func);
             return;
             break;  
-  case 'P': n = sprintf(debuglabel,"regpar: ");    
-            n += sprintf(debuglabel + n,"%s:", funcname);
-            sprintf(debuglabel + n,"%s ", name);
-            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
-            label->status = STATUS_DEFINED;
-            label->segment = currSeg;
-            label->value = segPtr[currSeg];
-            label->debug = DBG_FUNCARGREG;
-            ptr+=2;
-            label->debugvalue = v.con;
+ case 'P':  ptr+=2;
+            str2int(ptr, &i);
+            string_set_str(funcvar->name, name);
+            funcvar->type = i;
+            funcvar->pos = v.con;
+            funcvararr_push_back(func->regargs, funcvar);
             break;
-  case 'r': n = sprintf(debuglabel, "reglocal: ");
-            n += sprintf(debuglabel + n,"%s:", funcname);
-            sprintf(debuglabel + n,"%s ", name);
-            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
-            label->status = STATUS_DEFINED;
-            label->segment = currSeg;
-            label->value = segPtr[currSeg];
-            label->debug = DBG_VARLOCREG;
-            ptr+=2;
-            label->debugvalue = v.con;
+  case 'r': ptr+=2;
+            str2int(ptr, &i);
+            string_set_str(funcvar->name, name);
+            funcvar->type = i;
+            funcvar->pos = v.con;
+            funcvararr_push_back(func->reglocals, funcvar);
             break;
-  case 'p': n = sprintf(debuglabel,"stackpar: ");
-            n += sprintf(debuglabel + n,"%s:", funcname);
-            sprintf(debuglabel + n,"%s ", name);
-            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
-            label->status = STATUS_DEFINED;
-            label->segment = currSeg;
-            label->value = segPtr[currSeg];
-            label->debug = DBG_FUNCARGSTACK;
-            ptr+=2;
-            label->debugvalue = v.con;
+  case 'p': ptr+=2;
+            str2int(ptr, &i);
+            string_set_str(funcvar->name, name);
+            funcvar->type = i;
+            funcvar->pos = v.con;
+            funcvararr_push_back(func->stackargs, funcvar);
             break;
-  default:  n = sprintf(debuglabel, "stacklocal: ");
-            n += sprintf(debuglabel + n,"%s:", funcname);
-            sprintf(debuglabel + n,"%s ", name);
-            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
-            label->status = STATUS_DEFINED;
-            label->segment = currSeg;
-            label->value = segPtr[currSeg];
-            label->debug = DBG_VARLOCSTACK;
-            ptr++;
-            label->debugvalue = v.con;            
+  default:  ptr++;
+            str2int(ptr, &i);
+            string_set_str(funcvar->name, name);
+            funcvar->type = i;
+            funcvar->pos = v.con;
+            funcvararr_push_back(func->stacklocals, funcvar);
             break;
-  }
-  str2int(ptr, &i);
-  sprintf(label->name+strlen(label->name),"%d",i); 
-  label->debugtype = i;
-  if(label->debug==DBG_VARLOCSTACK || label->debug==DBG_VARLOCREG || label->debug==DBG_FUNCARGSTACK || label->debug==DBG_FUNCARGREG) {
-    sprintf(label->name+strlen(label->name), " @ 0x%08X", label->debugvalue);
   }
  }
 }
@@ -1412,17 +1414,17 @@ void dotSet(unsigned int code) {
             globalnew->name, lineno);
     }
     getToken();
-	expect(TOK_COMMA);
+    expect(TOK_COMMA);
     getToken();
-	expect(TOK_IDENT);
-	global = lookupEnter(tokenvalString, GLOBAL_TABLE, 0);
+    expect(TOK_IDENT);
+    global = lookupEnter(tokenvalString, GLOBAL_TABLE, 0);
     if (global->status != STATUS_DEFINED) {
       error(".set '%s' not defined, line %d",
             global->name, lineno);
     }
-	globalnew->segment = global->segment;
-	globalnew->value = global->value;
-	getToken();
+    globalnew->segment = global->segment;
+    globalnew->value = global->value;
+    getToken();
 }
 
 void dotImport(unsigned int code) {
@@ -2275,8 +2277,7 @@ void formatJR(unsigned int code) {
 }
 
 void formatJ0R(unsigned int code) {
-  int dst, src1;
-  Value v;
+  int dst, src1;  
   unsigned int immed;
 
   /* opcode with one register operands and immediate */  
@@ -2828,7 +2829,7 @@ void usage(char *myself) {
 int main(int argc, char *argv[]) {
   int i;
   char *argp;
-
+  char *tmp;
   sortInstrTable();
   tmpnam(codeName);
   tmpnam(dataName);
@@ -2877,6 +2878,17 @@ int main(int argc, char *argv[]) {
   if (outFile == NULL) {
     error("cannot open output file '%s'", outName);
   }
+  tmp = dirname(strdup(outName));  
+  strcpy(outpath, tmp);
+  strcat(outpath,"/");
+  if(debug) {
+      strcpy(dbgfile,outpath);
+      strcat(dbgfile,"as.dbg");
+      mlibinit();
+      f = m_core_fopen (dbgfile, "wt");
+      if (!f) abort();
+      m_serial_json_write_init(out, f);  
+  }
   do {
     inName = argv[i];
     if (*inName == '-') {
@@ -2920,6 +2932,13 @@ int main(int argc, char *argv[]) {
   }
   if (dataName != NULL) {
     unlink(dataName);
+  }
+  if(debug) {
+    ret = root_out_serial(out, root);
+    assert (ret == M_SERIAL_OK_DONE);
+    m_serial_json_write_clear(out); 
+    mlibclear();
+    fclose(f);
   }
   return 0;
 }
