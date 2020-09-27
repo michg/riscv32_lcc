@@ -265,6 +265,14 @@ lab:   ADDRGP4     "%a"
 reg:	lab			"\tla x%c,%0\n"	1
 reg:    con         "\tli x%c,%0\n" 1
 
+reg: CNSTI1  "# reg\n"  range(a, 0, 0)
+reg: CNSTI2  "# reg\n"  range(a, 0, 0)
+reg: CNSTI4  "# reg\n"  range(a, 0, 0)
+reg: CNSTU1  "# reg\n"  range(a, 0, 0)
+reg: CNSTU2  "# reg\n"  range(a, 0, 0)
+reg: CNSTU4  "# reg\n"  range(a, 0, 0)
+reg: CNSTP4  "# reg\n"  range(a, 0, 0) 
+
 addr:	reg			"0(x%0)"
 addr:	ADDRFP4			"%a+%F(x8)"
 addr:	ADDRLP4			"%a+%F(x8)"
