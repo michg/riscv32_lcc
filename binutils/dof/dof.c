@@ -158,7 +158,7 @@ void dumpRelocs(unsigned int totalSize) {
     }
     printf("    %d:\n", n);
     printf("        offset  = 0x%08X\n", relRec.offset);
-    if (relRec.method < 0 || relRec.method > 4) {
+    if (relRec.method < 0 || relRec.method > 5) {
       error("illegal relocation method");
     }
     printf("        method  = %s\n", methodName[relRec.method]);

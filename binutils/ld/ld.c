@@ -45,6 +45,7 @@ int debugFixup = 0;
 
 int withHeader = 1;
 int withDebug = 0;
+int doElf = 0;
 int rvc = 0;
 
 char codeName[L_tmpnam];
@@ -204,10 +205,10 @@ void error(char *fmt, ...) {
     fclose(inFile);
     inFile = NULL;
   }
-  if (codeName != NULL) {
+  if (codeName[0]) {
     unlink(codeName);
   }
-  if (dataName != NULL) {
+  if (dataName[0]) {
     unlink(dataName);
   }
   if (outName != NULL) {
@@ -1039,11 +1040,42 @@ void updatesymbols(void) {
 
 /**************************************************************/
 
+struct EHdr {
+  char  e_ident[16];
+  short e_type;
+  short e_machine;
+  int   e_version;
+  int   e_entry;
+  int   e_phoff;
+  int   e_shoff;
+  int   e_flags;
+  short e_ehsize;
+  short e_phentsize;
+  short e_phnum;
+  short e_shentsize;
+  short e_shnum;
+  short e_shtrndx;
+};
+
+struct PHdr {
+  int   p_type;
+  int   p_offset;
+  int   p_vaddr;
+  int   p_paddr;
+  int   p_filesz;
+  int   p_memsz;
+  int   p_flags;
+  int   p_align;
+};
+
+struct EHdr EHdr;
+struct PHdr PHdr;
 
 void writeHeader(void) {
   ExecHeader outHeader;
 
-  if (withHeader) {
+  if (!withHeader) return;
+  if (!doElf) {
     outHeader.magic = EXEC_MAGIC;
     outHeader.csize = segPtr[SEGMENT_CODE];
     outHeader.dsize = segPtr[SEGMENT_DATA];
@@ -1054,8 +1086,36 @@ void writeHeader(void) {
     outHeader.strsize = 0;
     fwrite(&outHeader, sizeof(ExecHeader), 1, outFile);
   }
-}
+  else {
+    int totsize = sizeof(EHdr) + sizeof(PHdr) + segPtr[SEGMENT_CODE] + segPtr[SEGMENT_DATA] + segPtr[SEGMENT_BSS];
 
+    memcpy(EHdr.e_ident, "\x7f\x45\x4c\x46\01\01\01\0\0\0\0\0\0\0\0\0", 16);
+    EHdr.e_type      = 2;   /* ET_EXEC */
+    EHdr.e_machine   = 243; /* RISC-V  */
+    EHdr.e_version   = 1;
+    EHdr.e_entry     = 0x10000 + sizeof(EHdr) + sizeof(PHdr);
+    EHdr.e_phoff     = sizeof(EHdr);
+    EHdr.e_shoff     = 0;
+    EHdr.e_flags     = 0;
+    EHdr.e_ehsize    = sizeof(EHdr);
+    EHdr.e_phentsize = sizeof(PHdr);
+    EHdr.e_phnum     = 1;
+    EHdr.e_shentsize = 0;
+    EHdr.e_shnum     = 0;
+    EHdr.e_shtrndx   = 0;
+    fwrite(&EHdr, sizeof(EHdr), 1, outFile);
+    
+    PHdr.p_type      = 1;   /* LOAD */
+    PHdr.p_offset    = 0;
+    PHdr.p_vaddr     = 0x10000;
+    PHdr.p_paddr     = 0x10000;
+    PHdr.p_filesz    = totsize;
+    PHdr.p_memsz     = totsize;
+    PHdr.p_flags     = 7;   /* R+W+X permission */
+    PHdr.p_align     = 0x00100;
+    fwrite(&PHdr, sizeof(PHdr), 1, outFile);
+  }
+}
 
 void writeCode(void) {
   int data;
@@ -1153,7 +1213,7 @@ int readlibsymbols(char * libname) {
   int i;
   long pos;
   
-  unsigned int n = 40;
+  size_t n = 40;
   char symname[40], filename[40];
   char* symnameptr = &symname[0];
   char* filenameptr = &filename[0];
@@ -1237,6 +1297,7 @@ int extractfilefromlib(char *libname, char *filename) {
 void usage(char *myself) {
   fprintf(stderr, "Usage: %s\n", myself);
   fprintf(stderr, "         [-h]             do not write object header\n");
+  fprintf(stderr, "         [-e]             write ELF executable header\n");
   fprintf(stderr, "         [-o objfile]     set output file name\n");
   fprintf(stderr, "         [-m mapfile]     produce map file\n");
   fprintf(stderr, "         [-rc addr]       relocate code segment\n");
@@ -1274,6 +1335,9 @@ int main(int argc, char *argv[]) {
     switch (*argp) {
       case 'h':
         withHeader = 0;
+        break;
+      case 'e':
+        doElf = 1;
         break;
       case 'g':
         withDebug = 1;
@@ -1463,10 +1527,10 @@ int main(int argc, char *argv[]) {
     fclose(mapFile);
     mapFile = NULL;
   }
-  if (codeName != NULL) {
+  if (codeName[0]) {
     unlink(codeName);
   }
-  if (dataName != NULL) {
+  if (dataName[0]) {
     unlink(dataName);
   }
   return 0;

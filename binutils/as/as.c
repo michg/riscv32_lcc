@@ -137,6 +137,7 @@
 #define OP_SW       0x2
 #define OP_JAL      0x0
 #define OP_JALR     0x0
+#define OP_CLL		0x0
 #define OP_BRK      0x1
 #define OP_MRET     0x302
 #define OP_MUL      0x008
@@ -2506,6 +2507,7 @@ Instr instrTable[] = {
   { "sh",      formatS, OP_SH    },
   { "sw",      formatS, OP_SW    },
   { "ebreak",  formatBRK, OP_BRK },
+  { "ecall",   formatBRK, OP_CLL },
   { "mret",  formatBRK, OP_MRET },
   { "c.ebreak",  formatBRK, OP_BRK },
   { "mul",     formatR, OP_MUL  },
