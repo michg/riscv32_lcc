@@ -643,9 +643,6 @@ void relocateSegments(void) {
     fixupRef(rel, 1);
     rel = rel->next;
   }
-    //rvcarray = Set_toArray(rvcset, NULL);
-    //qsort(rvcarray, Set_length(rvcset), sizeof (*rvcarray),  cmpint2);
-    //arruint_special_sort(rvcarray);   
   
   updatesymbols();
   while (relocs != NULL) {

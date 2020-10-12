@@ -76,6 +76,7 @@ static void clobber(Node);
 static int mulops_calls(int op);
 static int move100(Node p);
 static int movehard(Node p);
+extern void stabend(Coordinate *, Symbol, Coordinate **, Symbol *, Symbol *); 
 
 #define INTTMP	0x700000E0
 #define INTVAR	0x0FFC0000
@@ -793,23 +794,32 @@ static void progend(void) {
 static void segment(int n) {
   static int currSeg = -1;
   int newSeg;
-
-  switch (n) {
-    case CODE:
-      newSeg = CODE;
-      break;
-    case BSS:
-      newSeg = BSS;
-      break;
-    case DATA:
-      newSeg = DATA;
-      break;
-    case LIT:
-      newSeg = DATA;
-      break;
-  }
-  if (currSeg == newSeg) {
+ 
+  if(n == DBGBEG) {
+    print("\t.section .debug_info\n");
     return;
+  }
+  if(n != DBGEND){
+  
+    switch (n) {
+      case CODE:
+        newSeg = CODE;
+        break;
+      case BSS:
+        newSeg = BSS;
+        break;
+      case DATA:
+        newSeg = DATA;
+        break;
+      case LIT:
+        newSeg = DATA;
+        break;
+    }
+    if (currSeg == newSeg) {
+      return;
+    }
+  } else {
+   if(currSeg>0) newSeg = currSeg;
   }
   print("\t.align 4\n");
   switch (newSeg) {
@@ -1172,7 +1182,7 @@ Interface riscv32IR = {
   progend,
   segment,
   space,
-  stabblock, 0, stabfend, stabinitrv, stabline, stabsym, stabtype,
+  stabblock, stabend, stabfend, stabinitrv, stabline, stabsym, stabtype,
   {
     1,      /* max_unaligned_load */
     rmap,

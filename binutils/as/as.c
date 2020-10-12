@@ -1,7 +1,7 @@
 /*
  * as.c -- RISCV32 assembler
  */
-
+ 
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,7 +14,7 @@
 #include "../include/a.out.h"
 #include "../include/dbg.h"
 #include "stab.h"
-
+#include "dwarf.h"
 
 /**************************************************************/
 
@@ -181,9 +181,12 @@ FILE *inFile = NULL;
 char line[LINE_SIZE];
 char debuglabel[LINE_SIZE];
 char funcname[LINE_SIZE];
+char varname[LINE_SIZE];
+char currfuncnameend[LINE_SIZE];
 char tmpstring[LINE_SIZE];
 char *lineptr;
 int lineno;
+fpos_t lastline;
 
 int token;
 int tokenvalNumber;
@@ -1195,6 +1198,201 @@ void dotCode(unsigned int code) {
 
 void dotData(unsigned int code) {
   currSeg = SEGMENT_DATA;
+  while(token != TOK_EOL) getToken();
+}
+int newsection() {
+ if((strncmp(tokenvalString, ".section", strlen(".section")) == 0) || (strcmp(tokenvalString,".text")==0) \
+ || (strcmp(tokenvalString,".bss")==0) || (strcmp(tokenvalString,".data")==0)) {
+    return 1;
+ } else return 0;
+}
+
+void asm_dbgabrev() {
+ fgetpos(inFile, &lastline);
+ while (fgets(line, LINE_SIZE, inFile) != NULL) {
+    lineno++;
+	lineptr = line;
+    getToken();
+    if(newsection()) {fsetpos(inFile,&lastline);lineno--;break;}
+    fgetpos(inFile, &lastline);
+    
+  }
+}
+
+void parse_type() {
+    int no;
+    str2int(&tokenvalString[1], &no);
+    fgets(line, LINE_SIZE, inFile);
+    lineno++;
+    fgets(line, LINE_SIZE, inFile);
+    lineno++;
+    lineptr = line;
+    getToken();
+    getToken();
+    string_set_str(typdef->name, tokenvalString);
+    typdef->number = no;
+    typdefarr_push_back(root->typdefs, typdef);
+}
+
+void parse_symbol() {
+    int no;
+    Symbol *label;
+    fgets(line, LINE_SIZE, inFile);
+    lineno++;
+    lineptr = line;
+    getToken();
+    getToken();
+    switch(tokenvalNumber) {
+    case DW_TAG_subprogram: fgets(line, LINE_SIZE, inFile);
+        lineno++;
+        lineptr = line;
+        getToken();
+        getToken();
+        string_set_str(funckey, tokenvalString);
+        sprintf(debuglabel,"%s beg", tokenvalString);
+        label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
+        label->status = STATUS_DEFINED;
+        label->debug = DBG_FUNCBEG; 
+        strcpy(currfuncnameend, tokenvalString);
+        strcat(currfuncnameend, "_end");
+        fgets(line, LINE_SIZE, inFile);
+        lineno++;
+        lineptr = line;
+        getToken();
+        getToken();
+        str2int(&tokenvalString[1], &no);
+        func->rettype = no;
+        break;
+    case DW_TAG_formal_parameter: fgets(line, LINE_SIZE, inFile);
+        lineno++;
+        lineptr = line;
+        getToken();
+        getToken();
+        string_set_str(funcvar->name, tokenvalString);
+        fgets(line, LINE_SIZE, inFile);
+        lineno++;
+        lineptr = line;
+        getToken();
+        getToken();
+        str2int(&tokenvalString[1], &no);
+        funcvar->type = no;
+        fgets(line, LINE_SIZE, inFile);
+        lineno++;
+        lineptr = line;
+        getToken();
+        getToken();
+        if(tokenvalNumber == 1) {
+            fgets(line, LINE_SIZE, inFile);
+            lineno++;
+            lineptr = line;
+            getToken();
+            getToken();
+            funcvar->pos = tokenvalNumber - DW_OP_reg0;
+            funcvararr_push_back(func->regargs, funcvar); 
+        } else {
+            fgets(line, LINE_SIZE, inFile);
+            fgets(line, LINE_SIZE, inFile);
+            lineno+=2;
+            lineptr = line;
+            getToken();
+            getToken();
+            funcvar->pos = tokenvalNumber;
+            funcvararr_push_back(func->stackargs, funcvar); 
+        }
+        break;
+    case DW_TAG_variable: fgets(line, LINE_SIZE, inFile);
+        lineno++;
+        lineptr = line;
+        getToken();
+        getToken();
+        string_set_str(funcvar->name, tokenvalString);
+        strcpy(varname, tokenvalString);
+        fgets(line, LINE_SIZE, inFile);
+        lineno++;
+        lineptr = line;
+        getToken();
+        getToken();
+        str2int(&tokenvalString[1], &no);
+        funcvar->type = no;
+        fgets(line, LINE_SIZE, inFile);
+        lineno++;
+        lineptr = line;
+        getToken();
+        getToken();
+        // global
+        if(tokenvalNumber == 1) {
+            sprintf(debuglabel, "%s ", varname);
+            label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
+            deref(lookupEnter(varname, LOCAL_TABLE, 0));
+            label->status = STATUS_DEFINED;
+            label->debug = DBG_VARGLO;
+            label->debugtype = no;
+            sprintf(label->name+strlen(label->name),"%d",no); 
+         } else {         
+         fgets(line, LINE_SIZE, inFile);
+         lineno++;
+         lineptr = line;
+         getToken();
+         getToken();
+        // reglocal
+        if(tokenvalNumber == 1) {
+            fgets(line, LINE_SIZE, inFile);
+            lineno++;
+            lineptr = line;
+            getToken();
+            getToken();
+            funcvar->pos = tokenvalNumber - DW_OP_reg0;
+            funcvararr_push_back(func->reglocals, funcvar); 
+        // stacklocal
+        } else {
+            fgets(line, LINE_SIZE, inFile);
+            fgets(line, LINE_SIZE, inFile);
+            lineno+=2;
+            lineptr = line;
+            getToken();
+            getToken();
+            funcvar->pos = tokenvalNumber;
+            funcvararr_push_back(func->stacklocals, funcvar); 
+        }
+     }
+   }
+}
+
+void asm_dbginfo() {
+    fgetpos(inFile, &lastline);
+	while (fgets(line, LINE_SIZE, inFile) != NULL) {
+    lineno++;
+	lineptr = line;
+    getToken();
+    if((token == TOK_LABEL) && (tokenvalString[0]=='T')) parse_type();
+    if((token == TOK_LABEL) && (tokenvalString[0]=='E')) parse_symbol();
+    if(newsection()){fsetpos(inFile,&lastline);lineno--;break;}
+    fgetpos(inFile, &lastline);
+  }
+}
+
+void asm_dbgpubnames() {
+    fgetpos(inFile, &lastline);
+	while (fgets(line, LINE_SIZE, inFile) != NULL) {
+    lineno++;
+	lineptr = line;
+    getToken();
+    if(newsection())  {fsetpos(inFile,&lastline);lineno--;break;}
+    fgetpos(inFile, &lastline);
+  }
+}
+
+void dotSection(unsigned int code) {
+  //expect(TOK_STRING);
+  if(strncmp(tokenvalString, ".debug_abbrev",strlen(".debug_abbrev")) == 0)
+  asm_dbgabrev();
+  else if(strncmp(tokenvalString,".debug_info",strlen(".debug_info")) == 0)
+  asm_dbginfo();
+ else if(strncmp(tokenvalString,".debug_pubnames",strlen(".debug_pubnames")) == 0)
+  asm_dbgpubnames();
+  else if(strncmp(tokenvalString,".rodata",strlen(".rodata")) == 0)
+	dotData(0);
+  else error("invalid section '%s'", tokenvalString);
   while(token != TOK_EOL) getToken();
 }
 
@@ -2380,7 +2578,7 @@ Instr instrTable[] = {
   { ".nosyn",  dotNosyn,  0 },
   { ".text",   dotCode,   0 },
   { ".data",   dotData,   0 },
-  { ".section", dotData,   0 },
+  { ".section", dotSection,   0 },
   { ".bss",    dotBss,    0 },
   { ".globl", dotExport, 0 },
   { ".import", dotImport, 0 },
@@ -2527,6 +2725,15 @@ Instr instrTable[] = {
 };
 
 
+typedef struct dbginstr {
+  char *name;
+  void (*func)(unsigned int code);
+} DbgInstr;
+
+DbgInstr DbgInstrTable[] = {
+{ ".uleb128",  Ignore }
+};
+
 static int cmpInstr(const void *instr1, const void *instr2) {
   return strcmp(((Instr *) instr1)->name, ((Instr *) instr2)->name);
 }
@@ -2591,6 +2798,8 @@ void asmModule(void) {
     lineptr = line;
     getToken();
     while (token == TOK_LABEL) {
+      if(debug && (strcmp(currfuncnameend, tokenvalString) == 0)) 
+        funcdict_set_at(root->functions, funckey, func); 
       label = deref(lookupEnter(tokenvalString, LOCAL_TABLE, 0));
       if (label->status != STATUS_UNKNOWN) {
         error("label '%s' multiply defined in line %d",

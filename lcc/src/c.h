@@ -198,7 +198,7 @@ enum {
 
 #undef gop
 #undef op
-enum { CODE=1, BSS, DATA, LIT };
+enum { CODE=1, BSS, DATA, LIT, DBGBEG, DBGEND};
 enum { PERM=0, FUNC, STMT };
 struct list {
 	void *x;
