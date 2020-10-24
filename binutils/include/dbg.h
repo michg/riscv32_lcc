@@ -34,7 +34,11 @@ TUPLE_DEF2(typdef,
 #define M_OPL_typdef_t() TUPLE_OPLIST(typdef, STRING_OPLIST, M_DEFAULT_OPLIST, STRING_OPLIST)
 
 ARRAY_DEF(typdefarr, typdef_t)
-#define M_OPL_typdefarr_t() ARRAY_OPLIST(typdefarr, M_OPL_typdef_t() )
+static inline void update_typdefarrvalue (typdefarr_t *p, const typdefarr_t val) { typdefarr_set(*p, val); } 
+#define M_OPL_typdefarr_t() M_OPEXTEND(ARRAY_OPLIST(typdefarr, M_OPL_typdef_t() ), UPDATE(update_typdefarrvalue M_IPTR) )
+
+DICT_DEF2(typdefdict, string_t, typdefarr_t)
+#define M_OPL_typdefdict_t() DICT_OPLIST(typdefdict, STRING_OPLIST, M_OPL_typdefarr_t() )
 
 TUPLE_DEF2(funcvar,
            (name, string_t),
@@ -45,7 +49,9 @@ TUPLE_DEF2(funcvar,
 ARRAY_DEF(funcvararr, funcvar_t)
 #define M_OPL_funcvararr_t() ARRAY_OPLIST(funcvararr, M_OPL_funcvar_t() )
 
+
 TUPLE_DEF2(func,
+           (filename, string_t),
            (startpos, int),
 		   (endpos, int),
 		   (rettype, int),
@@ -53,7 +59,10 @@ TUPLE_DEF2(func,
 		   (stackargs, funcvararr_t),
 		   (reglocals, funcvararr_t),
 		   (regargs, funcvararr_t) )
-#define M_OPL_func_t() TUPLE_OPLIST(func, M_DEFAULT_OPLIST, M_DEFAULT_OPLIST, M_DEFAULT_OPLIST, M_OPL_funcvararr_t(), M_OPL_funcvararr_t(), M_OPL_funcvararr_t(), M_OPL_funcvararr_t())
+static inline void update_funcvalue (func_t *p, const func_t val) { func_set(*p, val); } 
+#define M_OPL_func_t()  M_OPEXTEND(TUPLE_OPLIST(func, STRING_OPLIST, M_DEFAULT_OPLIST, M_DEFAULT_OPLIST, M_DEFAULT_OPLIST, M_OPL_funcvararr_t(), M_OPL_funcvararr_t(), M_OPL_funcvararr_t(), M_OPL_funcvararr_t()) , UPDATE(update_funcvalue M_IPTR) )
+ 
+
 
 //ARRAY_DEF(funcarr, func_t)
 //#define M_OPL_funcarr_t() ARRAY_OPLIST(funcarr, M_OPL_func_t() )
@@ -64,8 +73,8 @@ TUPLE_DEF2(root,
            (locations, locarr_t),
 		   (functions, funcdict_t),
            (globals, globarr_t),
-           (typdefs, typdefarr_t) )
-#define M_OPL_root_t() TUPLE_OPLIST(root, M_OPL_locarr_t(), M_OPL_globarr_t(), M_OPL_typdefarr_t() )
+           (typdefs, typdefdict_t) )
+#define M_OPL_root_t() TUPLE_OPLIST(root, M_OPL_locarr_t(), M_OPL_funcdict_t(), M_OPL_globarr_t(), M_OPL_typdefdict_t() )
 
 
 #endif 

@@ -26,13 +26,15 @@ str2int = make_num
 def load_debug():
     global typemap
     typemap = {}
-    f = open('dbg.json','r')
+    f = open('ld.dbg','r')
     dbg = json.load(f)
     
-    typedefs = dbg['typedefs']
+    typedefs = dbg['typdefs']
     Type = namedtuple('Type',['name','desc'])
-    for type in typedefs: 
-        typemap[type['number']] = Type(type['name'],type['desc'])
+    for key in typedefs.keys():
+        typemap[key] = {}
+        for type in typedefs[key]:
+            typemap[key][type['number']] = Type(type['name'],type['desc'])
     
     global globalmap
     globalmap = {}
@@ -40,30 +42,13 @@ def load_debug():
     Global = namedtuple('Global',['typenr','adr'])
     for glob in globals:
         globalmap[glob['name']] = Global(glob['type'],glob['pos'])
-        
+    global funcadrlist
+    funcadrlist = [] 
     global funcmap
     funcmap = {}
-    funcs = dbg['functions']
-    Func = namedtuple('Func',['rettype','startpos','endpos','stacklocals','reglocals'])
-    Stackvar =  namedtuple('Stackvar',['type','pos'])
-    Regvar =  namedtuple('Regvar',['type','pos'])
-    global funcadrlist
-    funcadrlist = []
-    for func in funcs:
-        stacks = func['stacklocals'] + func['stackargs']
-        stackmap = {}
-        
-        for stack in stacks:        
-            stackmap[stack['name']] = Stackvar(stack['type'], stack['pos'])
-        regs = func['reglocals'] + func['regargs']
-        regmap = {}
-        
-        for reg in regs:        
-            regmap[reg['name']] = Regvar(reg['type'], reg['pos'])
-        funcmap[func['funcname']] = Func(func['rettype'],func['startpos'], func['endpos'], stackmap, regmap) 
-        
-        funcadrlist.append(func['startpos'])
-    
+    funcmap = dbg['functions']
+    for func in funcmap.values():
+        funcadrlist.append(func['startpos']) 
     global adrmap
     global linemap
     adrmap = {}
@@ -83,7 +68,7 @@ def load_debug():
 def getfunc(adr):
     func = ""
     for key in funcmap:
-        if ((adr >= funcmap[key].startpos) and (adr<=funcmap[key].endpos)):
+        if ((adr >= funcmap[key]['startpos']) and (adr<=funcmap[key]['endpos'])):
             func = key
     return(func) 
 

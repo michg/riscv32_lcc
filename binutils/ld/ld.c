@@ -58,12 +58,14 @@ char *mapName = NULL;
 char *inName = NULL;
 char outpath[40];
 char destfile[40];
-char dbgfile[40];
+char dbgfilein[40];
+char dbgfileout[40];
 
 FILE *codeFile = NULL;
 FILE *dataFile = NULL;
 FILE *outFile = NULL;
-FILE *JsondebFile = NULL;
+FILE *JsondebFileout = NULL;
+FILE *JsondebFilein = NULL;
 FILE *mapFile = NULL;
 FILE *inFile = NULL;
 
@@ -304,24 +306,29 @@ rbtuint_t rvctree;
 rbtuint_it_t rbtitr;
 
 loc_t loc;
-func_t  *funcptr;
+func_t *funcptr;
 string_t funckey; 
 global_t glob;
 typdef_t typdef;
 funcvar_t funcvar;
 root_t root;
+root_t rootas;
 m_serial_read_t  in;
 m_serial_write_t out;
 m_serial_return_code_t ret;
+string_t dictdbg;
 
 
 void mlibinit() {
     loc_init(loc);
+    //func_init(func);
     funcvar_init(funcvar);
     string_init(funckey);
     global_init(glob);
     typdef_init(typdef);
+    root_init(rootas);
     root_init(root);
+    string_init(dictdbg);
 
 }
 
@@ -331,8 +338,10 @@ void mlibclear() {
     global_clear(glob);
     typdef_clear(typdef);
     string_clear(funckey);
+    root_init(rootas);
     root_clear(root);
     listcstr_clear(liblist);
+    string_clear(dictdbg);
 }
 
 
@@ -1412,18 +1421,11 @@ int main(int argc, char *argv[]) {
   strcat(outpath,"/");    
   if(withDebug) {
     mlibinit();
-    strcpy(dbgfile,outpath);
-    strcat(dbgfile,"as.dbg");
-    JsondebFile = m_core_fopen (dbgfile, "rt");
-    if (!JsondebFile) abort();
-    m_serial_json_read_init(in, JsondebFile);
-    ret = root_in_serial(root, in);
-    fclose(JsondebFile);
-    strcpy(dbgfile,outpath);
-    strcat(dbgfile,"ld.dbg");
-    JsondebFile = m_core_fopen (dbgfile, "wt");
-    if (!JsondebFile) abort();
-    m_serial_json_write_init(out, JsondebFile); 
+    strcpy(dbgfileout,outpath);
+    strcat(dbgfileout,"ld.dbg");
+    JsondebFileout = m_core_fopen (dbgfileout, "wt");
+    if (!JsondebFileout) abort();
+    m_serial_json_write_init(out, JsondebFileout); 
   }
   if (mapName != NULL) {
     mapFile = fopen(mapName, "wt");
@@ -1439,7 +1441,24 @@ int main(int argc, char *argv[]) {
     inFile = fopen(inName, "rb");
     if (inFile == NULL) {
       error("cannot open input file '%s'", inName);
-    }   
+    }
+    if(withDebug) {
+	  tmp = strdup(inName);
+      tmp = basename(tmp);
+      *strchr(tmp,'.') = '\0';
+      strcat(tmp,".dbg");
+      strcpy(dbgfilein,outpath);
+	  strcat(dbgfilein,"/");
+      strcat(dbgfilein,tmp);
+	  JsondebFilein = m_core_fopen (dbgfilein, "rt");
+      if (JsondebFilein) {
+        m_serial_json_read_init(in, JsondebFilein);
+        ret = root_in_serial(rootas, in);
+	    funcdict_splice(root->functions, rootas->functions);
+	    typdefdict_splice(root->typdefs, rootas->typdefs);
+        fclose(JsondebFilein);
+      }
+	}
     fprintf(stderr, "Reading module '%s'...\n", inName);
     readModule();
     if (inFile != NULL) {
@@ -1499,13 +1518,13 @@ int main(int argc, char *argv[]) {
   if (mapFile != NULL) {
     printToMapFile();
   }
-  if (JsondebFile != NULL) {    
+  if (JsondebFileout != NULL) {    
     printToDebFile();
     ret = root_out_serial(out, root);
     assert (ret == M_SERIAL_OK_DONE);
     m_serial_json_write_clear(out); 
     mlibclear();
-    fclose(JsondebFile);
+    fclose(JsondebFileout);
   }
   rbtuint_clear(rvctree);
   if (codeFile != NULL) {

@@ -170,8 +170,8 @@ char dataName[L_tmpnam];
 char srcfileName[L_tmpnam];
 char *outName = NULL;
 char *inName = NULL;
-char outpath[40];
-char dbgfile[40];
+char outpath[80];
+char dbgfile[80];
 
 FILE *codeFile = NULL;
 FILE *dataFile = NULL;
@@ -234,6 +234,7 @@ func_t func;
 string_t funckey;
 global_t glob;
 typdef_t typdef;
+typdefarr_t typdefarr;
 funcvar_t funcvar;
 root_t root;
 m_serial_read_t  in;
@@ -245,9 +246,10 @@ void mlibinit() {
     loc_init(loc);
     funcvar_init(funcvar);
     func_init(func);
-	string_init(funckey);
+    string_init(funckey);
     global_init(glob);
     typdef_init(typdef);
+    typdefarr_init(typdefarr);
     root_init(root);
 }
 
@@ -255,9 +257,10 @@ void mlibclear() {
     loc_clear(loc);
     funcvar_clear(funcvar);
     func_clear(func);
-	string_clear(funckey);
+    string_clear(funckey);
     global_clear(glob);
     typdef_clear(typdef);
+    typdefarr_clear(typdefarr);
     root_clear(root);
 } 
 
@@ -1231,7 +1234,7 @@ void parse_type() {
     getToken();
     string_set_str(typdef->name, tokenvalString);
     typdef->number = no;
-    typdefarr_push_back(root->typdefs, typdef);
+    typdefarr_push_back(typdefarr, typdef);
 }
 
 void parse_symbol() {
@@ -1249,6 +1252,7 @@ void parse_symbol() {
         getToken();
         getToken();
         string_set_str(funckey, tokenvalString);
+        string_set_str(func->filename, srcfileName);
         sprintf(debuglabel,"%s beg", tokenvalString);
         label = deref(lookupEnter(debuglabel, GLOBAL_TABLE, 1));
         label->status = STATUS_DEFINED;
@@ -1425,7 +1429,7 @@ void dotStabs(unsigned int code) {
     string_set_str(typdef->name, name);
     typdef->number = typenum;
     string_set_str(typdef->desc, def);
-    typdefarr_push_back(root->typdefs, typdef); 
+    typdefarr_push_back(typdefarr, typdef); 
     
   } else {
   }
@@ -1473,6 +1477,7 @@ void dotStabs(unsigned int code) {
             label->debugtype = i;
             string_set_str(funckey, name);
             func->rettype = i;
+            string_set_str(func->filename, srcfileName);
             return;
             break;    
  case 'E':  funcdict_set_at(root->functions, funckey, func);
@@ -3092,9 +3097,14 @@ int main(int argc, char *argv[]) {
   tmp = dirname(strdup(outName));  
   strcpy(outpath, tmp);
   strcat(outpath,"/");
+  
   if(debug) {
+      tmp = strdup(outName);
+      tmp = basename(tmp);
+      *strchr(tmp,'.') = '\0';
+      strcat(tmp,".dbg");
       strcpy(dbgfile,outpath);
-      strcat(dbgfile,"as.dbg");
+      strcat(dbgfile,tmp);
       mlibinit();
       f = m_core_fopen (dbgfile, "wt");
       if (!f) abort();
@@ -3110,12 +3120,14 @@ int main(int argc, char *argv[]) {
       error("cannot open input file '%s'", inName);
     }
     fprintf(stderr, "Assembling module '%s'...\n", inName);
+    string_set_str(func->filename, inName);
     asmModule();
     if (inFile != NULL) {
       fclose(inFile);
       inFile = NULL;
     }
     linkLocals();
+    if(debug)  typdefdict_set_at(root->typdefs, func->filename, typdefarr);
   } while (++i < argc);
   writeDummyHeader();
   writeCode();
